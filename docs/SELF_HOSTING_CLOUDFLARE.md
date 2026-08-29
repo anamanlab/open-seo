@@ -13,6 +13,12 @@ Related guides:
 - **A Cloudflare account with R2 enabled.** Activating R2 requires a payment method on file, even within its free tier — if you have never used R2, open `R2` in the Cloudflare dashboard once.
 - **A DataForSEO account** — see [`DATAFORSEO_API_KEY.md`](./DATAFORSEO_API_KEY.md).
 
+Cloudflare Free accounts allow five Cron Triggers per account. To keep a
+self-host deployment within that quota, scheduled rank checks and the stale-
+audit watchdog are disabled by default. Manual rank checks and audits still
+work. Set `SELF_HOST_ENABLE_CRONS=1` in `.env.selfhost` only when the account
+has spare cron capacity or uses Workers Paid.
+
 ## 1) Clone your OpenSEO repo
 
 Fork `every-app/open-seo` on GitHub if you want a repo you control, then clone it locally:
@@ -57,6 +63,12 @@ and certificate, and uses that hostname for the Access application and auth
 base URL. The public `workers.dev` URL is disabled when a custom hostname is
 configured, so it cannot bypass Access. If `SELF_HOST_DOMAIN` is left unset,
 the deployment uses its stage-specific `workers.dev` hostname instead.
+
+Self-host deployments do not create Cron Triggers by default so they work on
+the Free plan. To opt into automatic scheduled rank checks and stale-audit
+reconciliation, set `SELF_HOST_ENABLE_CRONS=1` before deploying. The OAuth
+cleanup schedule used by hosted mode is not needed for Access-gated self-host
+deployments.
 
 ## 4) Deploy
 

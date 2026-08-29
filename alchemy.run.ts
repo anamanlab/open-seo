@@ -19,6 +19,7 @@ import {
   parseSelfHostDomain,
   resolveSelfHostHostname,
 } from "./src/shared/selfhost-domain.ts";
+import { resolveSelfHostCrons } from "./src/shared/selfhost-crons.ts";
 
 // Preview hostnames are `open-seo-<stage>.<WORKERS_SUBDOMAIN>` — the naming
 // lives in alchemy.access.ts, shared with the Access wildcard the security
@@ -321,6 +322,13 @@ export default Alchemy.Stack(
     const workersSubdomain = yield* readWorkersSubdomain({ required: false });
     const configuredSelfHostDomain = yield* optionalVar("SELF_HOST_DOMAIN");
     const selfHostDomain = parseSelfHostDomain(configuredSelfHostDomain);
+    const enableSelfHostCrons =
+      (yield* optionalVar("SELF_HOST_ENABLE_CRONS")) === "1";
+    const crons = resolveSelfHostCrons(
+      stage,
+      wrangler.triggers.crons,
+      enableSelfHostCrons,
+    );
 
     // Auth needs an absolute BETTER_AUTH_URL. Prod sets it explicitly;
     // self-hosts use the configured custom domain when present, otherwise they
@@ -405,8 +413,10 @@ export default Alchemy.Stack(
       },
       placement:
         wrangler.placement?.mode === "smart" ? { mode: "smart" } : undefined,
-      // Scheduled rank checks — src/server.ts `scheduled` handler.
-      crons: wrangler.triggers.crons,
+      // Scheduled rank checks — src/server.ts `scheduled` handler. Self-host
+      // deployments default to no triggers for Cloudflare Free-plan accounts;
+      // SELF_HOST_ENABLE_CRONS=1 opts back in when scheduling is available.
+      crons,
       env: {
         ...makeResources(stage),
         ...dataEnv,
