@@ -50,6 +50,14 @@ Copy the template and fill in the required values:
 cp .env.selfhost.example .env.selfhost
 ```
 
+To use a custom hostname in an active Cloudflare zone, set
+`SELF_HOST_DOMAIN` to the hostname only (for example, `seo.optvoo.com`). The
+deploy creates the Worker Custom Domain, lets Cloudflare create its DNS record
+and certificate, and uses that hostname for the Access application and auth
+base URL. The public `workers.dev` URL is disabled when a custom hostname is
+configured, so it cannot bypass Access. If `SELF_HOST_DOMAIN` is left unset,
+the deployment uses its stage-specific `workers.dev` hostname instead.
+
 ## 4) Deploy
 
 ```bash
