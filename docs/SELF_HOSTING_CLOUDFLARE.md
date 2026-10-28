@@ -76,6 +76,40 @@ pnpm install
 pnpm deploy:selfhost --yes
 ```
 
+## Multi-machine deployments with Google OAuth (Optvoo installation)
+
+This fork protects the existing Google Search Console and Analytics connections.
+All projects share the same Google OAuth grants, so accidentally replacing an
+OAuth setting can break reporting for every project at once.
+
+**Do not generate a fresh BETTER_AUTH_SECRET.** Its original value encrypts the
+existing OAuth tokens. A different value can make saved grants unusable.
+
+The `deploy:selfhost` command and the Alchemy self-host stack now **fail before
+deploying** if any of the following are missing:
+
+- `GOOGLE_CLIENT_ID` (web OAuth client ID)
+- `GOOGLE_CLIENT_SECRET` (the original secret for that client)
+- `BETTER_AUTH_SECRET` (the original token-encryption secret; at least 32 characters)
+
+The preferred long-term workflow for deploying from multiple VPSs is to store
+the **complete, original** `.env.selfhost` as the GitHub Actions secret
+`ENV_SELFHOST` in the `production` environment, together with the Cloudflare
+API credentials `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. Keep the
+file out of Git. Configure deployment approvals for the production environment,
+then run **Actions → Deploy OpenSEO (production) → Run workflow** from `main`.
+
+The workflow uses the same `selfhost` Alchemy stage, preserving existing
+Cloudflare resources instead of creating a replacement installation. Its
+preflight stops the deployment before changing infrastructure when the
+centralized credentials are absent.
+
+**One-time setup:** Recover the original secrets from an authorized secure
+backup or the original deploy machine. Cloudflare will not return secret values
+via its API. After populating the GitHub secret, stop running production
+Alchemy deployments directly from individual VPSs. Edit and push code from
+anywhere, then deploy exclusively through the controlled workflow.
+
 ## Giving teammates access
 
 Add the teammate to `ACCESS_ALLOWED_EMAILS` in `.env.selfhost` and redeploy. Dashboard edits to that Access policy are overwritten on the next deploy. (If you manage the Access application yourself, edit its Allow policy in Zero Trust instead.)
