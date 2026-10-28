@@ -48,6 +48,44 @@ if (!env.DATAFORSEO_API_KEY) {
     `${em("DATAFORSEO_API_KEY")} is not set in ${envFile} — see docs/DATAFORSEO_API_KEY.md for how to get one.`,
   );
 }
+
+// This installation already has several projects linked to the same Google
+// OAuth grants. Alchemy reconciles Worker bindings on EVERY deploy and treats
+// omitted optional variables as empty. Fail BEFORE building or deploying;
+// otherwise a deploy from a new VPS silently invalidates every project.
+const googleClientId = (env.GOOGLE_CLIENT_ID || "").trim();
+const googleClientSecret = (env.GOOGLE_CLIENT_SECRET || "").trim();
+const betterAuthSecret = (env.BETTER_AUTH_SECRET || "").trim();
+const missingGoogleConfig = [
+  ["GOOGLE_CLIENT_ID", googleClientId],
+  ["GOOGLE_CLIENT_SECRET", googleClientSecret],
+  ["BETTER_AUTH_SECRET", betterAuthSecret],
+]
+  .filter(([, value]) => !value)
+  .map(([name]) => name);
+if (missingGoogleConfig.length) {
+  fail(
+    "Google OAuth is already in use by production OpenSEO projects.",
+    `Missing from ${envFile}: ${missingGoogleConfig.join(", ")}.`,
+    "Restore the ORIGINAL values from the canonical, secure deployment configuration.",
+    "Never replace BETTER_AUTH_SECRET with a new random value: it encrypts stored Google grants.",
+    "Do not deploy from a new VPS with an incomplete .env.selfhost.",
+  );
+}
+if (
+  !googleClientId.endsWith(".apps.googleusercontent.com") ||
+  googleClientId.length < 50
+) {
+  fail(
+    "GOOGLE_CLIENT_ID does not look like a valid Google OAuth web client ID.",
+  );
+}
+if (betterAuthSecret.length < 32) {
+  fail(
+    "BETTER_AUTH_SECRET must be at least 32 characters and must match the original deployment.",
+  );
+}
+
 // When both are set, the deploy provisions no Access resources (hand-managed
 // application) and needs neither ACCESS_ALLOWED_EMAILS nor the access:write
 // login scope.

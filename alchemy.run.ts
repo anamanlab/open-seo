@@ -309,6 +309,26 @@ export default Alchemy.Stack(
     const databaseProvider = yield* optionalVar("DATABASE_PROVIDER");
     const workersSubdomain = yield* readWorkersSubdomain({ required: false });
 
+    // Defense in depth: refuse direct Alchemy deploys that bypass
+    // scripts/selfhost-deploy-preflight.mjs. Missing values become empty Worker
+    // bindings and can break every GSC/GA4 project sharing the same grant.
+    if (stage === "selfhost") {
+      const googleClientId = yield* dataEnv.GOOGLE_CLIENT_ID;
+      const googleClientSecret = yield* dataEnv.GOOGLE_CLIENT_SECRET;
+      const betterAuthSecret = yield* dataEnv.BETTER_AUTH_SECRET;
+      if (
+        !googleClientId.endsWith(".apps.googleusercontent.com") ||
+        !Redacted.value(googleClientSecret) ||
+        Redacted.value(betterAuthSecret).length < 32
+      ) {
+        return yield* Effect.die(
+          new Error(
+            "OpenSEO self-host: missing Google OAuth credentials. Restore the original GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and BETTER_AUTH_SECRET before deploying. Never rotate BETTER_AUTH_SECRET while stored OAuth grants exist.",
+          ),
+        );
+      }
+    }
+
     // Auth needs an absolute BETTER_AUTH_URL. Prod sets it explicitly;
     // previews always derive it from the deterministic worker name — a wrong
     // WORKERS_SUBDOMAIN surfaces in CI's post-deploy Access verify step.
