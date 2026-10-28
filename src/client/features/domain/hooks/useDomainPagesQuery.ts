@@ -76,6 +76,11 @@ export function useDomainPagesQuery(input: DomainPagesQueryInput) {
         },
       }),
     staleTime: 60_000,
+    // Requests may incur DataForSEO charges; never automatically repeat failed
+    // research or refetch it just because the browser window regains focus.
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
   useEffect(() => {
     debugDomain("useDomainPagesQuery:state", {
