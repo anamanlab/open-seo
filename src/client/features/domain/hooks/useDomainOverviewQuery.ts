@@ -31,5 +31,10 @@ export function useDomainOverviewQuery(input: Input) {
         },
       }),
     staleTime: 5 * 60_000,
+    // Requests may incur DataForSEO charges; never automatically repeat failed
+    // research or refetch it just because the browser window regains focus.
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 }
