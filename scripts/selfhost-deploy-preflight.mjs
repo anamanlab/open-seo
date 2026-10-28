@@ -76,11 +76,16 @@ if (
   !googleClientId.endsWith(".apps.googleusercontent.com") ||
   googleClientId.length < 50
 ) {
-  fail("GOOGLE_CLIENT_ID does not look like a valid Google OAuth web client ID.");
+  fail(
+    "GOOGLE_CLIENT_ID does not look like a valid Google OAuth web client ID.",
+  );
 }
 if (betterAuthSecret.length < 32) {
-  fail("BETTER_AUTH_SECRET must be at least 32 characters and must match the original deployment.");
+  fail(
+    "BETTER_AUTH_SECRET must be at least 32 characters and must match the original deployment.",
+  );
 }
+
 // When both are set, the deploy provisions no Access resources (hand-managed
 // application) and needs neither ACCESS_ALLOWED_EMAILS nor the access:write
 // login scope.
