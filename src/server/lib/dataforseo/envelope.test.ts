@@ -137,7 +137,7 @@ describe("assertOk", () => {
   );
 
   it.each([40200, 40203, 40204, 40210])(
-    "classifies task status %s as a provider billing restriction without charging",
+    "classifies task status %s as a billing restriction",
     (status) => {
       const task = {
         status_code: status,
@@ -151,7 +151,9 @@ describe("assertOk", () => {
         throw new Error("expected assertOk to throw");
       } catch (error) {
         expect(error).not.toBeInstanceOf(DataforseoChargedTaskError);
-        expect(error).toMatchObject({ code: "DATAFORSEO_BILLING_ISSUE" });
+        expect(error).toMatchObject({
+          code: "DATAFORSEO_BILLING_ISSUE",
+        });
       }
     },
   );
