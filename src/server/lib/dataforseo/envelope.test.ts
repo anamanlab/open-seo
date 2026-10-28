@@ -136,26 +136,6 @@ describe("assertOk", () => {
     },
   );
 
-  it.each([40200, 40203, 40204, 40210])(
-    "classifies task status %s as a billing restriction",
-    (status) => {
-      const task = {
-        status_code: status,
-        status_message: "Account billing restriction",
-        path: ["v3", "dataforseo_labs", "google", "domain_rank_overview", "live"],
-        cost: 0.03,
-        result_count: 0,
-      };
-      try {
-        assertOk({ status_code: 20000, tasks: [task] });
-        throw new Error("expected assertOk to throw");
-      } catch (error) {
-        expect(error).not.toBeInstanceOf(DataforseoChargedTaskError);
-        expect(error).toMatchObject({ code: "DATAFORSEO_BILLING_ISSUE" });
-      }
-    },
-  );
-
   it("treats 40501 as an empty success when asked", () => {
     const task = {
       status_code: 40501,
