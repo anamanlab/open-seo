@@ -98,6 +98,19 @@ const INVALID_FIELD_MESSAGE_RE = /Invalid Field:\s*'([^']+)'/i;
  * know exactly what tripped them. Append the offending value so the charged
  * failure is diagnosable from the captured message alone.
  */
+// DataForSEO may return an account billing restriction inside an HTTP 200
+// task response instead of as an HTTP 402. These failures must never be metered.
+const PROVIDER_BILLING_TASK_CODES = new Set([40200, 40203, 40204, 40210]);
+
+function accountBillingError(status: number | undefined): AppError | null {
+  return status !== undefined && PROVIDER_BILLING_TASK_CODES.has(status)
+    ? new AppError(
+        "DATAFORSEO_BILLING_ISSUE",
+        "DataForSEO billing, spending limit or API access restriction",
+      )
+    : null;
+}
+
 function describeInvalidField(
   message: string,
   task: DataforseoTaskLike,
@@ -170,6 +183,7 @@ export function assertOk<T extends DataforseoTaskLike>(
     const message = response.status_message || "DataForSEO request failed";
     throw (
       classify?.(response.status_code, message, classifyPath ?? "") ??
+      accountBillingError(response.status_code) ??
       new AppError("INTERNAL_ERROR", message)
     );
   }
@@ -184,7 +198,9 @@ export function assertOk<T extends DataforseoTaskLike>(
 
     const message = task.status_message || "DataForSEO task failed";
     const path = classifyPath ?? (task.path ? `/${task.path.join("/")}` : "");
-    const classified = classify?.(task.status_code, message, path);
+    const classified =
+      classify?.(task.status_code, message, path) ??
+      accountBillingError(task.status_code);
     if (classified) throw classified;
 
     const detailedMessage = describeInvalidField(message, task);
