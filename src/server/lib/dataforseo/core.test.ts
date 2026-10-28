@@ -11,6 +11,18 @@ afterEach(() => {
 });
 
 describe("DataForSEO OnPage transport", () => {
+  it("reports DataForSEO HTTP 402 as a provider billing issue rather than an application crash", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response("Payment required", { status: 402 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(onPageApi().lighthouseLiveJson([])).rejects.toMatchObject({
+      code: "DATAFORSEO_BILLING_ISSUE",
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it("does not retry a Lighthouse HTTP 5xx response", async () => {
     const fetchMock = vi
       .fn()
