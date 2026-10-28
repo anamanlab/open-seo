@@ -14,7 +14,8 @@ concurrency:
 
 jobs:
   deploy:
-    if: github.repository == 'anamanlab/open-seo' && github.ref == 'refs/heads/main'
+    if: >-
+      github.repository == 'anamanlab/open-seo' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 35
@@ -31,7 +32,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: "22"
           cache: pnpm
 
       - name: Load single canonical production configuration
