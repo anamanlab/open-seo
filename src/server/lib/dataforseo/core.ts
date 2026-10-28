@@ -100,11 +100,11 @@ function createAuthenticatedFetch(
           ? "DATAFORSEO_BILLING_ISSUE"
           : response.status >= 500
             ? "UPSTREAM_UNAVAILABLE"
-          : response.status === 429
-            ? "RATE_LIMITED"
-            : response.status === 401
-              ? "DATAFORSEO_AUTH_FAILED"
-              : "INTERNAL_ERROR";
+            : response.status === 429
+              ? "RATE_LIMITED"
+              : response.status === 401
+                ? "DATAFORSEO_AUTH_FAILED"
+                : "INTERNAL_ERROR";
       const error = new AppError(
         code,
         `DataForSEO HTTP ${response.status} on ${path}`,
