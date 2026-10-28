@@ -96,8 +96,10 @@ function createAuthenticatedFetch(
       if (classified) throw classified;
 
       const code: ErrorCode =
-        response.status >= 500
-          ? "UPSTREAM_UNAVAILABLE"
+        response.status === 402
+          ? "DATAFORSEO_BILLING_ISSUE"
+          : response.status >= 500
+            ? "UPSTREAM_UNAVAILABLE"
           : response.status === 429
             ? "RATE_LIMITED"
             : response.status === 401
