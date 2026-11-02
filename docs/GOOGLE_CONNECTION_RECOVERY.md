@@ -4,13 +4,15 @@
 
 The live `open-seo-selfhost` Worker serves `seo.optvoo.com`. Its current Google
 OAuth client belongs to Google Cloud project `optvoo`. On November 2, read-only
-checks confirmed that the client ID, client-secret binding, and original
-encryption-secret binding were present. The required Analytics Admin, Analytics
+checks confirmed that the client ID, client-secret binding, and
+encryption-secret binding were present. Binding presence alone does not establish
+secret-value continuity. The required Analytics Admin, Analytics
 Data, and Search Console APIs were enabled. Four GSC and four GA4 project
 mappings remained intact.
 
-Both stored grants last refreshed successfully on October 29 around 13:13 UTC.
-Their access tokens expired around 14:13 UTC; their recorded refresh-grant
+Both stored grant rows were last updated on October 29 around 13:13 UTC, with
+access-token expiry about one hour later, consistent with a successful refresh.
+Their recorded refresh-grant
 expiries were October 29 at 21:34:17 UTC (GSC) and 21:34:41 UTC (GA4). These
 timestamps establish expired recorded grants, not the underlying Google policy.
 The account row's creation time does not establish the latest consent time.
