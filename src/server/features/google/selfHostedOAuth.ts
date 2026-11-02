@@ -226,6 +226,7 @@ async function upsertGrant(input: {
       ),
     )
     .limit(1);
+  const refreshLifetime = input.tokens.refresh_token_expires_in;
   const accountValues = {
     accountId: googleAccountId,
     providerId: input.integration.providerId,
@@ -242,14 +243,8 @@ async function upsertGrant(input: {
     ),
     // Retain known expiry when reusing a token; a new token may have unknown expiry.
     refreshTokenExpiresAt:
-      input.tokens.refresh_token_expires_in !== undefined
-        ? z
-            .date()
-            .parse(
-              new Date(
-                Date.now() + input.tokens.refresh_token_expires_in * 1_000,
-              ),
-            )
+      refreshLifetime !== undefined
+        ? z.date().parse(new Date(Date.now() + refreshLifetime * 1_000))
         : input.tokens.refresh_token
           ? null
           : (existing[0]?.refreshTokenExpiresAt ?? null),
