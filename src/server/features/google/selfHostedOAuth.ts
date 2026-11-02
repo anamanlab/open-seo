@@ -14,6 +14,7 @@ import { responseForAppError } from "@/server/lib/http-errors";
 import { getPublicOrigin } from "@/server/mcp/public-origin";
 import { GA4_OAUTH_PROVIDER_ID, GA4_OAUTH_SCOPES } from "@/shared/ga4";
 import { GSC_OAUTH_PROVIDER_ID, GSC_OAUTH_SCOPES } from "@/shared/gsc";
+import { assertGoogleApiScopes } from "./googleConsentScopes";
 import {
   getGoogleOAuthClientConfig,
   hasSelfHostedGoogleOAuthConfig,
@@ -292,7 +293,9 @@ async function exchangeCode(input: {
       `Google rejected the ${input.integration.displayName} authorization code.`,
     );
   }
-  return googleTokenResponseSchema.parse(await response.json());
+  const tokens = googleTokenResponseSchema.parse(await response.json());
+  assertGoogleApiScopes(input.integration, tokens.scope);
+  return tokens;
 }
 
 export async function createSelfHostedGoogleAuthorizationUrl(input: {

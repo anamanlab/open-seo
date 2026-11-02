@@ -137,7 +137,7 @@ describe("self-hosted Google OAuth providers", () => {
           access_token: "access-token",
           refresh_token: "refresh-token",
           expires_in: 3600,
-          scope: "openid analytics.readonly",
+          scope: "openid https://www.googleapis.com/auth/analytics.readonly",
           id_token: idToken,
         }),
         { status: 200 },
