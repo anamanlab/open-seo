@@ -240,8 +240,7 @@ async function upsertGrant(input: {
     accessTokenExpiresAt: new Date(
       Date.now() + (input.tokens.expires_in ?? 3600) * 1_000,
     ),
-    // A new token without a supplied lifetime has unknown expiry. If Google
-    // omits a replacement token, retain the existing token's known expiry.
+    // Retain known expiry when reusing a token; a new token may have unknown expiry.
     refreshTokenExpiresAt:
       input.tokens.refresh_token_expires_in !== undefined
         ? z
