@@ -5,7 +5,13 @@ import { GscApiError, GscTokenError } from "@/server/lib/gscErrors";
 import { GscService } from "./GscService";
 
 const mocks = vi.hoisted(() => {
-  const state: { selectRows: Array<{ id: string; accountId: string }> } = {
+  const state: {
+    selectRows: Array<{
+      id: string;
+      accountId: string;
+      refreshTokenExpiresAt?: Date | null;
+    }>;
+  } = {
     selectRows: [],
   };
   type GscClientOptions = { userId: string; gscAccountId?: string };
@@ -21,7 +27,10 @@ const mocks = vi.hoisted(() => {
   const dbSelect = vi.fn(() => ({
     from: vi.fn(() => ({
       where: vi.fn(() => {
-        const rows = state.selectRows;
+        const rows = state.selectRows.map((row) => ({
+          refreshTokenExpiresAt: null,
+          ...row,
+        }));
         return Object.assign(Promise.resolve(rows), {
           limit: vi.fn().mockResolvedValue(rows),
         });
@@ -182,6 +191,44 @@ describe("GscService.listSitesForUserWithGrantStatus", () => {
     mocks.getUserInfoEmail.mockReset();
     mocks.createGscClient.mockClear();
     mocks.dbDelete.mockClear();
+  });
+
+  it.each([
+    { expiry: new Date("2026-10-29T00:00:00Z"), reconnect: true },
+    { expiry: new Date("2026-11-02T12:00:00Z"), reconnect: true },
+    { expiry: new Date("2026-11-09T00:00:00Z"), reconnect: false },
+    { expiry: null, reconnect: false },
+  ])(
+    "uses recorded refresh expiry $expiry only after token acquisition fails",
+    async ({ expiry, reconnect }) => {
+      vi.spyOn(Date, "now").mockReturnValue(
+        new Date("2026-11-02T12:00:00Z").getTime(),
+      );
+      mocks.state.selectRows = [
+        { id: "grant-a", accountId: "sub-a", refreshTokenExpiresAt: expiry },
+      ];
+      mocks.listSites.mockRejectedValue(new GscTokenError("token unavailable"));
+      vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const result = await GscService.listSitesForUserWithGrantStatus("u1");
+      expect(result.accounts[0]).toMatchObject({
+        requiresReconnect: reconnect,
+        sitesUnavailable: !reconnect,
+      });
+      expect(mocks.dbDelete).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps successful discovery usable even after recorded refresh expiry", async () => {
+    mocks.state.selectRows = [
+      { id: "grant-a", accountId: "sub-a", refreshTokenExpiresAt: new Date(0) },
+    ];
+    mocks.listSites.mockResolvedValue([]);
+    mocks.getUserInfoEmail.mockResolvedValue(null);
+    const result = await GscService.listSitesForUserWithGrantStatus("u1");
+    expect(result.accounts[0]).toMatchObject({
+      requiresReconnect: false,
+      sitesUnavailable: false,
+    });
   });
 
   it.each([

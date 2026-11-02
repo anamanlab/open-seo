@@ -86,7 +86,7 @@ export function Ga4PropertyPicker({
     return (
       <div className="space-y-3">
         <p className="text-sm text-error">
-          Google rejected this connection. Reconnect to continue.
+          Google authorization needs to be renewed. Reconnect to continue.
         </p>
         <div className="flex flex-wrap items-center gap-1">
           <GoogleConnectButton

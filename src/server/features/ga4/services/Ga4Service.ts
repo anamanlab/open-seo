@@ -3,7 +3,7 @@ import { db } from "@/db";
 import { account } from "@/db/schema";
 import { AppError } from "@/server/lib/errors";
 import { createGa4AdminClient } from "@/server/lib/ga4Client";
-import { Ga4AdminApiError } from "@/server/lib/ga4Errors";
+import { Ga4AdminApiError, Ga4TokenError } from "@/server/lib/ga4Errors";
 import { GA4_OAUTH_PROVIDER_ID } from "@/shared/ga4";
 import {
   Ga4ConnectionRepository,
@@ -16,7 +16,11 @@ async function getConnection(projectId: string): Promise<Ga4Connection | null> {
 
 async function listGrantsForUser(userId: string) {
   return db
-    .select({ id: account.id, accountId: account.accountId })
+    .select({
+      id: account.id,
+      accountId: account.accountId,
+      refreshTokenExpiresAt: account.refreshTokenExpiresAt,
+    })
     .from(account)
     .where(
       and(
@@ -59,7 +63,11 @@ async function listPropertiesForUserWithGrantStatus(userId: string) {
           properties,
         };
       } catch (error) {
-        const reconnect = requiresReconnect(error);
+        const reconnect =
+          requiresReconnect(error) ||
+          (error instanceof Ga4TokenError &&
+            grant.refreshTokenExpiresAt !== null &&
+            grant.refreshTokenExpiresAt.getTime() <= Date.now());
         if (!reconnect) {
           console.error("ga4.property_discovery_failed", {
             errorName: error instanceof Error ? error.name : "UnknownError",

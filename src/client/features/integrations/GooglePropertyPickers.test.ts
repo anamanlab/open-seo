@@ -106,7 +106,7 @@ describe("Google property discovery recovery", () => {
       }),
     );
     for (const markup of [gsc, ga4]) {
-      expect(markup).toContain("Google rejected this connection");
+      expect(markup).toContain("Google authorization needs to be renewed");
       expect(markup).toContain("Reconnect with Google");
       expect(markup).not.toContain("Connection expired");
     }

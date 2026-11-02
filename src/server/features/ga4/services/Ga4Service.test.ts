@@ -4,7 +4,13 @@ import { Ga4AdminApiError, Ga4TokenError } from "@/server/lib/ga4Errors";
 import { Ga4Service } from "./Ga4Service";
 
 const mocks = vi.hoisted(() => {
-  const state: { grants: Array<{ id: string; accountId: string }> } = {
+  const state: {
+    grants: Array<{
+      id: string;
+      accountId: string;
+      refreshTokenExpiresAt?: Date | null;
+    }>;
+  } = {
     grants: [],
   };
   const listProperties = vi.fn();
@@ -26,7 +32,10 @@ const mocks = vi.hoisted(() => {
     dbSelect: vi.fn(() => ({
       from: vi.fn(() => ({
         where: vi.fn(() => {
-          const rows = state.grants;
+          const rows = state.grants.map((row) => ({
+            refreshTokenExpiresAt: null,
+            ...row,
+          }));
           return Object.assign(Promise.resolve(rows), {
             limit: vi.fn().mockResolvedValue(rows),
           });
@@ -166,6 +175,47 @@ describe("Ga4Service", () => {
       }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
     expect(mocks.upsert).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { expiry: new Date("2026-10-29T00:00:00Z"), reconnect: true },
+    { expiry: new Date("2026-11-02T12:00:00Z"), reconnect: true },
+    { expiry: new Date("2026-11-09T00:00:00Z"), reconnect: false },
+    { expiry: null, reconnect: false },
+  ])(
+    "uses recorded refresh expiry $expiry only after token acquisition fails",
+    async ({ expiry, reconnect }) => {
+      vi.spyOn(Date, "now").mockReturnValue(
+        new Date("2026-11-02T12:00:00Z").getTime(),
+      );
+      mocks.state.grants = [
+        { id: "grant-a", accountId: "sub-a", refreshTokenExpiresAt: expiry },
+      ];
+      mocks.listProperties.mockRejectedValue(
+        new Ga4TokenError("token unavailable"),
+      );
+      vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const result =
+        await Ga4Service.listPropertiesForUserWithGrantStatus("u1");
+      expect(result.accounts[0]).toMatchObject({
+        requiresReconnect: reconnect,
+        propertiesUnavailable: !reconnect,
+      });
+      expect(mocks.dbDelete).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps successful discovery usable even after recorded refresh expiry", async () => {
+    mocks.state.grants = [
+      { id: "grant-a", accountId: "sub-a", refreshTokenExpiresAt: new Date(0) },
+    ];
+    mocks.listProperties.mockResolvedValue([]);
+    mocks.getUserInfoEmail.mockResolvedValue(null);
+    const result = await Ga4Service.listPropertiesForUserWithGrantStatus("u1");
+    expect(result.accounts[0]).toMatchObject({
+      requiresReconnect: false,
+      propertiesUnavailable: false,
+    });
   });
 
   it.each([

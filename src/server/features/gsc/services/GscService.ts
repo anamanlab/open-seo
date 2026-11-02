@@ -69,7 +69,11 @@ async function userHasGrant(userId: string): Promise<boolean> {
 
 async function listGrantsForUser(userId: string) {
   return db
-    .select({ id: account.id, accountId: account.accountId })
+    .select({
+      id: account.id,
+      accountId: account.accountId,
+      refreshTokenExpiresAt: account.refreshTokenExpiresAt,
+    })
     .from(account)
     .where(
       and(
@@ -112,7 +116,11 @@ async function listSitesForUserWithGrantStatus(
           sites,
         };
       } catch (error) {
-        const reconnect = isExpectedGrantFailure(error);
+        const reconnect =
+          isExpectedGrantFailure(error) ||
+          (error instanceof GscTokenError &&
+            grant.refreshTokenExpiresAt !== null &&
+            grant.refreshTokenExpiresAt.getTime() <= Date.now());
         if (!reconnect) {
           console.error("gsc.site_discovery_failed", {
             errorName: error instanceof Error ? error.name : "UnknownError",

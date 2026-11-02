@@ -88,7 +88,7 @@ export function SitePicker({
     return (
       <div className="space-y-3">
         <p className="text-sm text-error">
-          Google rejected this connection. Reconnect to continue.
+          Google authorization needs to be renewed. Reconnect to continue.
         </p>
         <button
           type="button"
