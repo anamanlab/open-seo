@@ -164,9 +164,124 @@ describe("self-hosted Google OAuth providers", () => {
         userId: "user-1",
         accessToken: "access-token",
         refreshToken: "refresh-token",
+        refreshTokenExpiresAt: null,
       }),
     );
   });
+
+  it.each([GA4_INTEGRATION, GSC_INTEGRATION])(
+    "persists finite refresh expiry for $providerId in milliseconds",
+    async (integration) => {
+      vi.useFakeTimers();
+      const now = new Date("2026-11-02T12:00:00Z");
+      vi.setSystemTime(now);
+      const state = await authorizationState(integration);
+      mocks.fetch.mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            access_token: "access-token",
+            refresh_token: "refresh-token",
+            refresh_token_expires_in: 604800,
+            id_token: `header.${btoa(JSON.stringify({ sub: "account-1" }))}.signature`,
+          }),
+        ),
+      );
+      await handleSelfHostedGoogleOAuthCallback({
+        integration,
+        request: callbackRequest(integration, state, { code: "code" }),
+        user,
+        publicOrigin,
+      });
+      expect(mocks.insertValues).toHaveBeenCalledWith(
+        expect.objectContaining({
+          refreshTokenExpiresAt: new Date(now.getTime() + 604800 * 1000),
+        }),
+      );
+    },
+  );
+
+  it.each([
+    { replacement: undefined, lifetime: undefined, expected: "existing" },
+    {
+      replacement: "replacement-token",
+      lifetime: undefined,
+      expected: "unknown",
+    },
+    { replacement: undefined, lifetime: 3600, expected: "supplied" },
+    { replacement: "replacement-token", lifetime: 3600, expected: "supplied" },
+    { replacement: undefined, lifetime: 0, expected: "now" },
+    { replacement: "replacement-token", lifetime: 0, expected: "now" },
+  ])(
+    "keeps token/expiry paired on reconnect: $expected ($replacement)",
+    async ({ replacement, lifetime, expected }) => {
+      vi.useFakeTimers();
+      const now = new Date("2026-11-02T12:00:00Z");
+      const oldExpiry = new Date("2026-11-05T12:00:00Z");
+      vi.setSystemTime(now);
+      mocks.selectLimit.mockResolvedValue([
+        {
+          id: "stored-account",
+          refreshToken: "existing-encrypted-token",
+          refreshTokenExpiresAt: oldExpiry,
+        },
+      ]);
+      const state = await authorizationState(GA4_INTEGRATION);
+      mocks.fetch.mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            access_token: "access-token",
+            refresh_token: replacement,
+            refresh_token_expires_in: lifetime,
+            id_token: `header.${btoa(JSON.stringify({ sub: "account-1" }))}.signature`,
+          }),
+        ),
+      );
+      await handleSelfHostedGoogleOAuthCallback({
+        integration: GA4_INTEGRATION,
+        request: callbackRequest(GA4_INTEGRATION, state, { code: "code" }),
+        user,
+        publicOrigin,
+      });
+      expect(mocks.updateSet).toHaveBeenCalledWith(
+        expect.objectContaining({
+          refreshToken: replacement ?? "existing-encrypted-token",
+          refreshTokenExpiresAt:
+            expected === "existing"
+              ? oldExpiry
+              : lifetime !== undefined
+                ? new Date(now.getTime() + lifetime * 1000)
+                : null,
+        }),
+      );
+    },
+  );
+
+  it.each([-1, 1.5, "604800", Number.MAX_SAFE_INTEGER])(
+    "rejects invalid refresh lifetime %s before persisting credentials",
+    async (lifetime) => {
+      const state = await authorizationState(GA4_INTEGRATION);
+      mocks.fetch.mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            access_token: "access-token",
+            refresh_token: "refresh-token",
+            refresh_token_expires_in: lifetime,
+            id_token: `header.${btoa(JSON.stringify({ sub: "account-1" }))}.signature`,
+          }),
+        ),
+      );
+      await expect(
+        handleSelfHostedGoogleOAuthCallback({
+          integration: GA4_INTEGRATION,
+          request: callbackRequest(GA4_INTEGRATION, state, { code: "code" }),
+          user,
+          publicOrigin,
+        }),
+      ).rejects.toThrow();
+      expect(mocks.insertValues).not.toHaveBeenCalled();
+      expect(mocks.updateSet).not.toHaveBeenCalled();
+    },
+  );
 
   it.each(["tampered", "expired"])(
     "rejects %s state before token exchange",

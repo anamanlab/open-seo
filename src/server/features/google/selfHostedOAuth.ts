@@ -63,6 +63,7 @@ const googleTokenResponseSchema = z.object({
   access_token: z.string().min(1),
   expires_in: z.number().optional(),
   refresh_token: z.string().optional(),
+  refresh_token_expires_in: z.number().int().nonnegative().optional(),
   scope: z.string().optional(),
   id_token: z.string().optional(),
   token_type: z.string().optional(),
@@ -211,7 +212,11 @@ async function upsertGrant(input: {
       : value;
   const googleAccountId = getGoogleAccountId(input.tokens);
   const existing = await db
-    .select({ id: account.id, refreshToken: account.refreshToken })
+    .select({
+      id: account.id,
+      refreshToken: account.refreshToken,
+      refreshTokenExpiresAt: account.refreshTokenExpiresAt,
+    })
     .from(account)
     .where(
       and(
@@ -221,6 +226,7 @@ async function upsertGrant(input: {
       ),
     )
     .limit(1);
+  const refreshLifetime = input.tokens.refresh_token_expires_in;
   const accountValues = {
     accountId: googleAccountId,
     providerId: input.integration.providerId,
@@ -235,7 +241,13 @@ async function upsertGrant(input: {
     accessTokenExpiresAt: new Date(
       Date.now() + (input.tokens.expires_in ?? 3600) * 1_000,
     ),
-    refreshTokenExpiresAt: null,
+    // Retain known expiry when reusing a token; a new token may have unknown expiry.
+    refreshTokenExpiresAt:
+      refreshLifetime !== undefined
+        ? z.date().parse(new Date(Date.now() + refreshLifetime * 1_000))
+        : input.tokens.refresh_token
+          ? null
+          : (existing[0]?.refreshTokenExpiresAt ?? null),
     scope: input.tokens.scope
       ? input.tokens.scope.trim().split(/\s+/).join(",")
       : input.integration.scopes.join(","),

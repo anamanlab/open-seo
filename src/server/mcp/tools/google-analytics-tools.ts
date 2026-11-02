@@ -156,6 +156,7 @@ function actionUrl(
       [
         "ga4_not_connected",
         "ga4_reconnect_required",
+        "ga4_token_unavailable",
         "ga4_property_inaccessible",
       ].includes(code)
     ) {
@@ -187,12 +188,18 @@ function errorResponse(
   } else if (error instanceof GscNotConnectedError) {
     code = "gsc_not_connected";
     message = "Search Console is not connected for this project.";
-  } else if (
-    error instanceof GscTokenError ||
-    (error instanceof GscApiError && [401, 403].includes(error.status))
-  ) {
+  } else if (error instanceof GscTokenError) {
+    code = "gsc_token_unavailable";
+    message =
+      "Could not obtain a Search Console access token. Check the connection and server OAuth configuration.";
+  } else if (error instanceof GscApiError && error.status === 401) {
     code = "gsc_reconnect_required";
-    message = "The Search Console connection has expired or was revoked.";
+    message =
+      "Google rejected Search Console authorization. Reconnect to continue.";
+  } else if (error instanceof GscApiError && error.status === 403) {
+    code = "gsc_property_inaccessible";
+    message =
+      "Search Console denied access. Check property permissions and enabled APIs.";
   } else if (error instanceof GscApiError) {
     code = "gsc_upstream_unavailable";
     message = "Search Console reporting is temporarily unavailable.";

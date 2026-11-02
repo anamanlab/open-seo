@@ -16,7 +16,11 @@ async function getConnection(projectId: string): Promise<Ga4Connection | null> {
 
 async function listGrantsForUser(userId: string) {
   return db
-    .select({ id: account.id, accountId: account.accountId })
+    .select({
+      id: account.id,
+      accountId: account.accountId,
+      refreshTokenExpiresAt: account.refreshTokenExpiresAt,
+    })
     .from(account)
     .where(
       and(
@@ -32,10 +36,7 @@ async function userHasGrant(userId: string): Promise<boolean> {
 }
 
 function requiresReconnect(error: unknown): boolean {
-  return (
-    error instanceof Ga4TokenError ||
-    (error instanceof Ga4AdminApiError && error.status === 401)
-  );
+  return error instanceof Ga4AdminApiError && error.status === 401;
 }
 
 async function listPropertiesForUserWithGrantStatus(userId: string) {
@@ -62,7 +63,11 @@ async function listPropertiesForUserWithGrantStatus(userId: string) {
           properties,
         };
       } catch (error) {
-        const reconnect = requiresReconnect(error);
+        const reconnect =
+          requiresReconnect(error) ||
+          (error instanceof Ga4TokenError &&
+            grant.refreshTokenExpiresAt !== null &&
+            grant.refreshTokenExpiresAt.getTime() <= Date.now());
         if (!reconnect) {
           console.error("ga4.property_discovery_failed", {
             errorName: error instanceof Error ? error.name : "UnknownError",

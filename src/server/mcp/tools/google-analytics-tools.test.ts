@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { makeGa4ReportResult } from "@/server/features/ga4/services/ga4-test-fixtures";
+import { GscApiError, GscTokenError } from "@/server/lib/gscErrors";
 import { Ga4ReportError } from "@/server/lib/ga4Errors";
 import * as tools from "./google-analytics-tools";
 import { makeToolContext } from "./tool-test-support";
@@ -156,6 +157,46 @@ describe("Google Analytics MCP tools", () => {
       },
     });
   });
+
+  it("keeps opaque Search Console token failures distinct from rejected grants", async () => {
+    mocks.getOpportunities.mockRejectedValueOnce(
+      new GscTokenError("secret response"),
+    );
+    const result = await tools.getSearchOpportunitiesTool.handler(
+      { projectId: "project_1", limit: 25 },
+      toolContext,
+    );
+    expect(result.structuredContent).toMatchObject({
+      status: "error",
+      error: { code: "gsc_token_unavailable" },
+    });
+    expect(JSON.stringify(result)).not.toContain("secret response");
+    expect(JSON.stringify(result)).not.toContain("expired or was revoked");
+  });
+
+  it.each([
+    [401, "gsc_reconnect_required"],
+    [403, "gsc_property_inaccessible"],
+    [429, "gsc_upstream_unavailable"],
+    [503, "gsc_upstream_unavailable"],
+  ])(
+    "classifies Search Console HTTP %s without assuming expiry",
+    async (status, code) => {
+      mocks.getOpportunities.mockRejectedValueOnce(
+        new GscApiError(status, "sensitive upstream detail"),
+      );
+      const result = await tools.getSearchOpportunitiesTool.handler(
+        { projectId: "project_1", limit: 25 },
+        toolContext,
+      );
+      expect(result.structuredContent).toMatchObject({
+        status: "error",
+        error: { code },
+      });
+      expect(JSON.stringify(result)).not.toContain("expired");
+      expect(JSON.stringify(result)).not.toContain("sensitive upstream detail");
+    },
+  );
 
   it("returns the cross-source opportunity envelope", async () => {
     mocks.getOpportunities.mockResolvedValue({

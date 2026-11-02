@@ -49,8 +49,8 @@ function buildGscFilters(data: { device?: string; country?: string }): {
   return { deviceFilters, filters };
 }
 
-/** Not connected, or a dead/denied grant (token failure or 401/403): the page
- *  renders the connect card. Other statuses (429, 5xx) are real faults. */
+/** Missing connections and rejected API credentials render the connect card.
+ *  Unknown token failures, permissions and temporary outages remain errors. */
 function isExpectedConnectionFailure(error: unknown): boolean {
   return error instanceof GscNotConnectedError || isExpectedGrantFailure(error);
 }

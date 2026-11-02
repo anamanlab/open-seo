@@ -105,7 +105,7 @@ function describeGscError(error: unknown): string {
     return "Search Console is not connected for this project.";
   }
   if (error instanceof GscTokenError) {
-    return "The Search Console connection has expired or was revoked. Reconnect it to continue.";
+    return "Could not obtain a Search Console access token. Check the connection and server OAuth configuration.";
   }
   if (error instanceof GscApiError) {
     return error.message;
@@ -289,7 +289,7 @@ export const getSearchConsolePerformanceTool = {
     } catch (error) {
       const isNotConnected = error instanceof GscNotConnectedError;
       return mcpResponse({
-        text: `${describeGscError(error)}${isNotConnected ? ` Connect it here: ${connectUrl}` : ` (reconnect at ${connectUrl})`}`,
+        text: `${describeGscError(error)}${isNotConnected ? ` Connect it here: ${connectUrl}` : ` (connection settings: ${connectUrl})`}`,
         meta,
         structuredContent: {
           ok: false,
@@ -397,7 +397,7 @@ export const inspectUrlsTool = {
     } catch (error) {
       const isNotConnected = error instanceof GscNotConnectedError;
       return mcpResponse({
-        text: `${describeGscError(error)}${isNotConnected ? ` Connect it here: ${connectUrl}` : ` (reconnect at ${connectUrl})`}`,
+        text: `${describeGscError(error)}${isNotConnected ? ` Connect it here: ${connectUrl}` : ` (connection settings: ${connectUrl})`}`,
         meta,
         structuredContent: {
           ok: false,

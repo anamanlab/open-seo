@@ -136,9 +136,11 @@ function normalizeOffset(value: number | undefined): number {
 export function mapGa4ReportError(error: unknown): never {
   if (error instanceof Ga4ReportError) throw error;
   if (error instanceof Ga4TokenError) {
+    // Better Auth also wraps configuration, decryption and transport failures.
+    // A failed token lookup alone does not establish that consent was revoked.
     throw new Ga4ReportError(
-      "ga4_reconnect_required",
-      "The Google Analytics connection has expired or was revoked.",
+      "ga4_token_unavailable",
+      "Could not obtain a Google Analytics access token. Check the connection and server OAuth configuration.",
     );
   }
   if (error instanceof Ga4MalformedResponseError) {
@@ -157,7 +159,7 @@ export function mapGa4ReportError(error: unknown): never {
     if (error.status === 401) {
       throw new Ga4ReportError(
         "ga4_reconnect_required",
-        "The Google Analytics connection has expired or was revoked.",
+        "Google rejected Google Analytics authorization. Reconnect to continue.",
       );
     }
     if (error.status === 403) {
