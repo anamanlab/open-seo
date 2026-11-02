@@ -156,6 +156,7 @@ function actionUrl(
       [
         "ga4_not_connected",
         "ga4_reconnect_required",
+        "ga4_token_unavailable",
         "ga4_property_inaccessible",
       ].includes(code)
     ) {
@@ -187,9 +188,13 @@ function errorResponse(
   } else if (error instanceof GscNotConnectedError) {
     code = "gsc_not_connected";
     message = "Search Console is not connected for this project.";
+  } else if (error instanceof GscTokenError) {
+    code = "gsc_token_unavailable";
+    message =
+      "Could not obtain a Search Console access token. Check the connection and server OAuth configuration.";
   } else if (
-    error instanceof GscTokenError ||
-    (error instanceof GscApiError && [401, 403].includes(error.status))
+    error instanceof GscApiError &&
+    [401, 403].includes(error.status)
   ) {
     code = "gsc_reconnect_required";
     message = "The Search Console connection has expired or was revoked.";

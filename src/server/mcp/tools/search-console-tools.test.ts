@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { GscApiError, GscNotConnectedError } from "@/server/lib/gscErrors";
+import {
+  GscApiError,
+  GscNotConnectedError,
+  GscTokenError,
+} from "@/server/lib/gscErrors";
 import * as searchConsoleTools from "./search-console-tools";
 import { makeToolContext } from "./tool-test-support";
 
@@ -39,6 +43,27 @@ describe("search console MCP tools", () => {
     });
     mocks.isHostedServerAuthMode.mockResolvedValue(true);
     mocks.hasSelfHostedGoogleOAuthConfig.mockResolvedValue(false);
+  });
+
+  it("reports opaque token failure without claiming revocation or leaking causes", async () => {
+    mocks.GscService.getPerformance.mockRejectedValueOnce(
+      new GscTokenError("secret token response", new Error("secret cause")),
+    );
+    const result =
+      await searchConsoleTools.getSearchConsolePerformanceTool.handler(
+        { projectId: "project_1" },
+        toolContext,
+      );
+    expect(result.structuredContent).toMatchObject({
+      ok: false,
+      reason: "api_error",
+    });
+    const rendered = JSON.stringify(result);
+    expect(rendered).toContain(
+      "Could not obtain a Search Console access token",
+    );
+    expect(rendered).not.toContain("expired or was revoked");
+    expect(rendered).not.toContain("secret");
   });
 
   it("returns performance rows on success and passes filters through", async () => {

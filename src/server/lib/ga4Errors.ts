@@ -41,6 +41,7 @@ type Ga4ReportErrorCode =
   | "validation_error"
   | "ga4_not_connected"
   | "ga4_reconnect_required"
+  | "ga4_token_unavailable"
   | "ga4_property_inaccessible"
   | "ga4_report_incompatible"
   | "ga4_quota_exhausted"

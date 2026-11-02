@@ -100,14 +100,12 @@ export function createGscClient(opts: {
       });
     } catch (error) {
       throw new GscTokenError(
-        "Could not mint a Search Console access token (grant revoked or expired).",
+        "Could not mint a Search Console access token.",
         error,
       );
     }
     if (!result?.accessToken) {
-      throw new GscTokenError(
-        "Search Console returned no access token (grant revoked or expired).",
-      );
+      throw new GscTokenError("Search Console returned no access token.");
     }
     return result.accessToken;
   }
