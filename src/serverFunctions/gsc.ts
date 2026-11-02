@@ -69,6 +69,7 @@ export const listGscSites = createServerFn({ method: "POST" })
         accountId: grant.accountId,
         email: grant.email,
         requiresReconnect: grant.requiresReconnect,
+        sitesUnavailable: grant.sitesUnavailable,
         sites: grant.sites.map((site) => {
           const isSelected = connection?.gscAccountId
             ? connection.gscAccountId === grant.accountId &&

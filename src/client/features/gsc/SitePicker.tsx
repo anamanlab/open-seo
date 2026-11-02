@@ -12,6 +12,7 @@ type AccountOption = {
   accountId: string;
   email: string | null;
   requiresReconnect: boolean;
+  sitesUnavailable: boolean;
   sites: SiteOption[];
 };
 
@@ -87,7 +88,7 @@ export function SitePicker({
     return (
       <div className="space-y-3">
         <p className="text-sm text-error">
-          Connection expired. Reconnect to continue.
+          Google rejected this connection. Reconnect to continue.
         </p>
         <button
           type="button"
@@ -102,7 +103,7 @@ export function SitePicker({
   }
 
   const healthyAccounts = accounts.filter(
-    (account) => !account.requiresReconnect,
+    (account) => !account.requiresReconnect && !account.sitesUnavailable,
   );
   const options = healthyAccounts.flatMap((account) =>
     account.sites.map((site) => ({
@@ -118,8 +119,28 @@ export function SitePicker({
       )
     : -1;
 
+  const hasUnavailableAccounts = accounts.some(
+    (account) => account.sitesUnavailable,
+  );
+
   return (
     <div className="space-y-4">
+      {hasUnavailableAccounts ? (
+        <div className="space-y-2">
+          <p className="text-sm text-warning">
+            Some Search Console properties couldn’t be loaded. Try again. If
+            this continues, check the Google connection, API configuration, and
+            property access.
+          </p>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={onRetry}
+          >
+            Try again
+          </button>
+        </div>
+      ) : null}
       <label className="block">
         <span className="mb-1.5 block text-sm font-medium text-base-content/80">
           Property

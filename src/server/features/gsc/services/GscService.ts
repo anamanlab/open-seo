@@ -41,6 +41,7 @@ type GscSiteListResult = {
     accountId: string;
     email: string | null;
     requiresReconnect: boolean;
+    sitesUnavailable: boolean;
     sites: GscSite[];
   }>;
 };
@@ -78,15 +79,10 @@ async function listGrantsForUser(userId: string) {
     );
 }
 
-/** Expected ways a stored grant fails to reach Search Console: no token could be
- *  minted (refresh token revoked or expired), or Google rejected the call
- *  (401/403). These surface a reconnect prompt without fault logging. */
+/** A rejected API credential can require fresh authorization. Opaque token
+ *  acquisition errors and permission errors do not establish expired consent. */
 export function isExpectedGrantFailure(error: unknown): boolean {
-  if (error instanceof GscTokenError) return true;
-  return (
-    error instanceof GscApiError &&
-    (error.status === 401 || error.status === 403)
-  );
+  return error instanceof GscApiError && error.status === 401;
 }
 
 async function listSitesForUserWithGrantStatus(
@@ -112,20 +108,22 @@ async function listSitesForUserWithGrantStatus(
           accountId: grant.accountId,
           email,
           requiresReconnect: false,
+          sitesUnavailable: false,
           sites,
         };
       } catch (error) {
-        if (!isExpectedGrantFailure(error)) {
-          console.error(
-            "Failed to list Search Console sites for account",
-            grant.accountId,
-            error,
-          );
+        const reconnect = isExpectedGrantFailure(error);
+        if (!reconnect) {
+          console.error("gsc.site_discovery_failed", {
+            errorName: error instanceof Error ? error.name : "UnknownError",
+            status: error instanceof GscApiError ? error.status : undefined,
+          });
         }
         return {
           accountId: grant.accountId,
           email: null,
-          requiresReconnect: true,
+          requiresReconnect: reconnect,
+          sitesUnavailable: !reconnect,
           sites: [],
         };
       }

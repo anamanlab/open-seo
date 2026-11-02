@@ -86,7 +86,7 @@ export function Ga4PropertyPicker({
     return (
       <div className="space-y-3">
         <p className="text-sm text-error">
-          Connection expired. Reconnect to continue.
+          Google rejected this connection. Reconnect to continue.
         </p>
         <div className="flex flex-wrap items-center gap-1">
           <GoogleConnectButton
@@ -124,10 +124,20 @@ export function Ga4PropertyPicker({
   return (
     <div className="space-y-4">
       {hasUnavailableAccounts ? (
-        <p className="text-sm text-warning">
-          Some properties couldn&rsquo;t be loaded. Check that the Analytics
-          Admin API is enabled and that this Google account has property access.
-        </p>
+        <div className="space-y-2">
+          <p className="text-sm text-warning">
+            Some Google Analytics properties couldn’t be loaded. Try again. If
+            this continues, check the Google connection, API configuration, and
+            property access.
+          </p>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={onRetry}
+          >
+            Try again
+          </button>
+        </div>
       ) : null}
       <label className="block">
         <span className="mb-1.5 block text-sm font-medium text-base-content/80">

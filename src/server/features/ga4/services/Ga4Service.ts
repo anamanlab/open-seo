@@ -3,7 +3,7 @@ import { db } from "@/db";
 import { account } from "@/db/schema";
 import { AppError } from "@/server/lib/errors";
 import { createGa4AdminClient } from "@/server/lib/ga4Client";
-import { Ga4AdminApiError, Ga4TokenError } from "@/server/lib/ga4Errors";
+import { Ga4AdminApiError } from "@/server/lib/ga4Errors";
 import { GA4_OAUTH_PROVIDER_ID } from "@/shared/ga4";
 import {
   Ga4ConnectionRepository,
@@ -32,10 +32,7 @@ async function userHasGrant(userId: string): Promise<boolean> {
 }
 
 function requiresReconnect(error: unknown): boolean {
-  return (
-    error instanceof Ga4TokenError ||
-    (error instanceof Ga4AdminApiError && error.status === 401)
-  );
+  return error instanceof Ga4AdminApiError && error.status === 401;
 }
 
 async function listPropertiesForUserWithGrantStatus(userId: string) {

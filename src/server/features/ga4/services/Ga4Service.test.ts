@@ -168,13 +168,40 @@ describe("Ga4Service", () => {
     expect(mocks.upsert).not.toHaveBeenCalled();
   });
 
-  it("distinguishes expired grants from inaccessible property discovery", async () => {
+  it.each([
+    new TypeError("fetch failed"),
+    new Ga4TokenError("token unavailable", new Error("private cause")),
+    new Ga4AdminApiError(429, "rate limited"),
+    new Ga4AdminApiError(503, "unavailable"),
+    new Ga4AdminApiError(403, "API disabled or permission denied"),
+  ])(
+    "keeps discovery failure %s retryable without claiming expiry",
+    async (error) => {
+      mocks.listProperties.mockRejectedValue(error);
+      vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const result =
+        await Ga4Service.listPropertiesForUserWithGrantStatus("u1");
+      expect(result.accounts).toEqual([
+        {
+          accountId: "sub-a",
+          email: null,
+          requiresReconnect: false,
+          propertiesUnavailable: true,
+          properties: [],
+        },
+      ]);
+      expect(mocks.dbDelete).not.toHaveBeenCalled();
+      expect(JSON.stringify(result)).not.toContain("private cause");
+    },
+  );
+
+  it("distinguishes rejected credentials from inaccessible property discovery", async () => {
     mocks.state.grants = [
       { id: "grant-a", accountId: "sub-a" },
       { id: "grant-b", accountId: "sub-b" },
     ];
     mocks.listProperties
-      .mockRejectedValueOnce(new Ga4TokenError("revoked"))
+      .mockRejectedValueOnce(new Ga4AdminApiError(401, "unauthorized"))
       .mockRejectedValueOnce(new Ga4AdminApiError(403, "forbidden"));
     const consoleError = vi
       .spyOn(console, "error")
