@@ -192,12 +192,14 @@ function errorResponse(
     code = "gsc_token_unavailable";
     message =
       "Could not obtain a Search Console access token. Check the connection and server OAuth configuration.";
-  } else if (
-    error instanceof GscApiError &&
-    [401, 403].includes(error.status)
-  ) {
+  } else if (error instanceof GscApiError && error.status === 401) {
     code = "gsc_reconnect_required";
-    message = "The Search Console connection has expired or was revoked.";
+    message =
+      "Google rejected Search Console authorization. Reconnect to continue.";
+  } else if (error instanceof GscApiError && error.status === 403) {
+    code = "gsc_property_inaccessible";
+    message =
+      "Search Console denied access. Check property permissions and enabled APIs.";
   } else if (error instanceof GscApiError) {
     code = "gsc_upstream_unavailable";
     message = "Search Console reporting is temporarily unavailable.";

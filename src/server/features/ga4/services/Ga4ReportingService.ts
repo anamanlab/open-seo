@@ -159,7 +159,7 @@ export function mapGa4ReportError(error: unknown): never {
     if (error.status === 401) {
       throw new Ga4ReportError(
         "ga4_reconnect_required",
-        "The Google Analytics connection has expired or was revoked.",
+        "Google rejected Google Analytics authorization. Reconnect to continue.",
       );
     }
     if (error.status === 403) {
