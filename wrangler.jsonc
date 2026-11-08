@@ -4,6 +4,13 @@
   "main": "src/server.ts",
   "compatibility_date": "2025-09-02",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  // BETTER_AUTH_SECRET is an inherited, unreadable Worker Secret (see
+  // docs/runbooks/selfhost-secret-continuity.md). It is never supplied via
+  // .env.selfhost / Alchemy; declare it required so a deploy fails loudly
+  // if the binding is missing instead of silently clearing it.
+  "secrets": {
+    "required": ["BETTER_AUTH_SECRET"],
+  },
   "observability": {
     "enabled": true,
     // Spans are billed as observability events (free tier 200k/day); add a

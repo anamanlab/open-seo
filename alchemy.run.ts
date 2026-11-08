@@ -264,7 +264,13 @@ const dataEnv = {
   // POLICY_AUD are stage-dependent and set in the stack body below.
   DATAFORSEO_API_KEY: Config.redacted("DATAFORSEO_API_KEY"),
   BYPASS_EMAIL_VERIFICATION: optionalVar("BYPASS_EMAIL_VERIFICATION"),
-  BETTER_AUTH_SECRET: optionalSecret("BETTER_AUTH_SECRET"),
+  // BETTER_AUTH_SECRET is intentionally NOT managed here. It is an
+  // inherited, unreadable Worker Secret (see docs/runbooks/selfhost-secret-continuity.md):
+  // Cloudflare preserves an existing secret across deploys only when it is
+  // not re-declared with an empty value, and Alchemy's Worker provider
+  // emits `secret_text` for every Redacted value including "". Declaring it
+  // here previously cleared the live secret on 2026-10-14. It stays bound to
+  // the Worker by name and is never rotated through this pipeline.
   GOOGLE_CLIENT_ID: optionalVar("GOOGLE_CLIENT_ID"),
   GOOGLE_CLIENT_SECRET: optionalSecret("GOOGLE_CLIENT_SECRET"),
   OPENROUTER_API_KEY: optionalSecret("OPENROUTER_API_KEY"),
