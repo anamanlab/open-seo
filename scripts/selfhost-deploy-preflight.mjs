@@ -48,17 +48,18 @@ if (!env.DATAFORSEO_API_KEY) {
     `${em("DATAFORSEO_API_KEY")} is not set in ${envFile} — see docs/DATAFORSEO_API_KEY.md for how to get one.`,
   );
 }
-// BETTER_AUTH_SECRET is an inherited, unreadable Worker Secret. Alchemy must
-// never receive it (an empty value would clear the live binding). Keep it out
-// of .env.selfhost entirely; if a value is present here it would be sent.
-if (env.BETTER_AUTH_SECRET) {
-  fail(
-    `${em("BETTER_AUTH_SECRET")} is set in ${envFile}, but it is an inherited Worker Secret`,
-    "and must not be supplied through this pipeline (a value here would be",
-    "re-declared and could clear or replace the live secret). Remove the line",
-    "from .env.selfhost and rely on the Worker's existing binding.",
-  );
-}
+// BETTER_AUTH_SECRET is an inherited, unreadable Worker Secret. Alchemy
+// cannot manage it safely: a missing/empty value is sent as secret_text ""
+// (clearing the live binding) and removing it from dataEnv makes Alchemy
+// delete the binding on the next deploy. Block this pipeline entirely and
+// use the Cloudflare CLI deploy path (scripts/selfhost-deploy-cf.mjs) or
+// accept a deliberate rotation (see docs/runbooks/selfhost-secret-continuity.md).
+fail(
+  `${em("pnpm deploy:selfhost")} cannot run for production: ${em("BETTER_AUTH_SECRET")}`,
+  "is an inherited, unreadable Worker Secret that Alchemy cannot manage",
+  "without clearing or deleting it. Use the Cloudflare CLI deploy path instead,",
+  "or accept a deliberate rotation with re-consent for all 5 GSC/GA4 projects.",
+);
 // When both are set, the deploy provisions no Access resources (hand-managed
 // application) and needs neither ACCESS_ALLOWED_EMAILS nor the access:write
 // login scope.
