@@ -87,7 +87,7 @@ export async function handleMcpApiKeyRequest(
     // Keep API keys scoped to /mcp: verifyApiKey (rather than Better Auth's
     // enableSessionForAPIKeys mock sessions) means a key never becomes a
     // session that could reach account or organization endpoints.
-    const authApi = getAuth().api;
+    const authApi = (await getAuth()).api;
     const result = await authApi.verifyApiKey({ body: { key: apiKey } });
 
     if (!result.valid || !result.key) {

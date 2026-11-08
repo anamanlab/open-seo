@@ -12,6 +12,7 @@ import * as pgSchema from "@/db/pg/schema";
 import { getDatabaseProvider } from "@/db/provider";
 import { z } from "zod";
 import { isHostedAuthMode } from "@/lib/auth-mode";
+import { getOptionalEnvValue } from "@/server/lib/runtime-env";
 import { createApiKeyPlugin } from "@/lib/auth-api-key";
 import { createBaseAuthConfig } from "@/lib/auth-config";
 import {
@@ -36,7 +37,7 @@ const hostedBaseUrlSchema = z
     );
   }, "BETTER_AUTH_URL must use https or localhost");
 
-function createAuth() {
+async function createAuth() {
   // Hosted needs the real configured URL (cookies, callbacks, /api/auth routes
   // all use it). Self-hosted only builds this instance to mint/refresh Search
   // Console tokens, which never read baseURL — so a placeholder is fine there.
@@ -66,7 +67,7 @@ function createAuth() {
 
   const auth = betterAuth({
     baseURL: baseUrl,
-    secret: getHostedSecret(),
+    secret: await getHostedSecret(),
     ...baseAuthConfig,
     emailAndPassword: {
       ...baseAuthConfig.emailAndPassword,
@@ -92,7 +93,7 @@ function createAuth() {
             });
           },
         },
-    socialProviders: getSocialProviders(),
+    socialProviders: await getSocialProviders(),
     trustedOrigins: getTrustedOrigins(baseUrl),
     database,
     plugins: [
@@ -156,7 +157,8 @@ function createAuth() {
   return auth;
 }
 
-let authInstance: ReturnType<typeof createAuth> | null = null;
+type AuthInstance = Awaited<ReturnType<typeof createAuth>>;
+let authInstancePromise: Promise<AuthInstance> | null = null;
 
 async function syncHostedSignupContact(user: {
   id: string;
@@ -206,8 +208,8 @@ export function getHostedBaseUrl() {
 // Required in hosted mode, and in self-hosted mode when Search Console is
 // enabled (it keys the OAuth-token encryption and is needed to build the auth
 // instance that mints/refreshes Search Console tokens).
-function getHostedSecret() {
-  const secret = env.BETTER_AUTH_SECRET?.trim();
+async function getHostedSecret() {
+  const secret = (await getOptionalEnvValue("BETTER_AUTH_SECRET"))?.trim();
 
   if (!secret) {
     throw new Error("BETTER_AUTH_SECRET is required");
@@ -220,7 +222,7 @@ function getHostedSecret() {
   return secret;
 }
 
-function getSocialProviders() {
+async function getSocialProviders() {
   // Google social login is hosted-only. Self-hosted builds the auth instance
   // solely for Search Console token ops, which use the genericOAuth provider
   // (createBaseAuthConfig) with its own creds — so it must NOT require the
@@ -231,13 +233,15 @@ function getSocialProviders() {
   }
 
   return {
-    google: getGoogleSocialProviderConfig(),
+    google: await getGoogleSocialProviderConfig(),
   };
 }
 
-function getGoogleSocialProviderConfig() {
-  const googleClientId = env.GOOGLE_CLIENT_ID?.trim();
-  const googleClientSecret = env.GOOGLE_CLIENT_SECRET?.trim();
+async function getGoogleSocialProviderConfig() {
+  const googleClientId = (await getOptionalEnvValue("GOOGLE_CLIENT_ID"))?.trim();
+  const googleClientSecret = (
+    await getOptionalEnvValue("GOOGLE_CLIENT_SECRET")
+  )?.trim();
 
   if (!googleClientId) {
     throw new Error("GOOGLE_CLIENT_ID is required in hosted mode");
@@ -269,11 +273,11 @@ function hasHostedAuthEmailConfig() {
   });
 }
 
-export function hasHostedAuthConfig() {
+export async function hasHostedAuthConfig() {
   try {
     getHostedBaseUrl();
-    getHostedSecret();
-    getGoogleSocialProviderConfig();
+    await getHostedSecret();
+    await getGoogleSocialProviderConfig();
     return (
       hasHostedTurnstileConfig(env) &&
       (Reflect.get(env, "BYPASS_EMAIL_VERIFICATION") === "true" ||
@@ -284,12 +288,12 @@ export function hasHostedAuthConfig() {
   }
 }
 
-export function getAuth() {
-  if (authInstance) {
-    return authInstance;
+export function getAuth(): Promise<AuthInstance> {
+  if (authInstancePromise) {
+    return authInstancePromise;
   }
 
-  authInstance = createAuth();
+  authInstancePromise = createAuth();
 
-  return authInstance;
+  return authInstancePromise;
 }

@@ -130,7 +130,7 @@ async function getGa4AccessToken(opts: {
 }): Promise<string> {
   let result: { accessToken?: string } | undefined;
   try {
-    result = await getAuth().api.getAccessToken({
+    result = await (await getAuth()).api.getAccessToken({
       body: {
         providerId: GA4_OAUTH_PROVIDER_ID,
         userId: opts.userId,

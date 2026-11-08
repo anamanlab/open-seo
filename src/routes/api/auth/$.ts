@@ -10,13 +10,13 @@ async function handleAuthRequest(request: Request) {
     });
   }
 
-  if (!hasHostedAuthConfig()) {
+  if (!(await hasHostedAuthConfig())) {
     return new Response("Missing Better Auth hosted configuration", {
       status: 500,
     });
   }
 
-  const auth = getAuth();
+  const auth = await getAuth();
   return auth.handler(request);
 }
 

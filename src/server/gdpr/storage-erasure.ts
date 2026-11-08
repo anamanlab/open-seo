@@ -139,7 +139,7 @@ async function revokeGoogleAccount(
 ): Promise<GoogleRevocationResult> {
   let accessToken: string | undefined;
   try {
-    const result = await getAuth().api.getAccessToken({
+    const result = await (await getAuth()).api.getAccessToken({
       body: {
         userId,
         providerId: account.providerId,

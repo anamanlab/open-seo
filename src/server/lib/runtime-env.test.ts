@@ -6,7 +6,8 @@ vi.mock("cloudflare:workers", () => ({
   env: {} as Record<string, unknown>,
 }));
 
-import { env as workersEnv } from "cloudflare:workers";
+import { env as workersEnvRaw } from "cloudflare:workers";
+const workersEnv = workersEnvRaw as unknown as Record<string, unknown>;
 import {
   _resetSecretCache,
   getEnvValueSync,

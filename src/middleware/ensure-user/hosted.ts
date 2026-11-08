@@ -5,14 +5,15 @@ import { AppError } from "@/server/lib/errors";
 import type { EnsuredUserContext } from "./types";
 
 async function requireHostedSession(headers: Headers) {
-  if (!hasHostedAuthConfig()) {
+  if (!(await hasHostedAuthConfig())) {
     throw new AppError(
       "AUTH_CONFIG_MISSING",
       "Missing Better Auth hosted configuration",
     );
   }
 
-  const session = await getAuth().api.getSession({ headers });
+  const auth = await getAuth();
+  const session = await auth.api.getSession({ headers });
 
   if (!session?.user?.id || !session.user.email) {
     throw new AppError("UNAUTHENTICATED");
@@ -36,7 +37,7 @@ export async function resolveHostedContext(
     };
   }
 
-  const authApi = getAuth().api;
+  const authApi = (await getAuth()).api;
   const organizationId = await getOrCreateDefaultHostedOrganization(
     session.user.id,
     (body) => authApi.createOrganization({ body }),

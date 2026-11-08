@@ -204,7 +204,7 @@ async function upsertGrant(input: {
   user: SelfHostedGoogleUser;
   tokens: GoogleTokenResponse;
 }) {
-  const ctx = await getAuth().$context;
+  const ctx = await (await getAuth()).$context;
   const encrypt = (value: string) =>
     ctx.options.account?.encryptOAuthTokens
       ? symmetricEncrypt({ key: ctx.secretConfig, data: value })

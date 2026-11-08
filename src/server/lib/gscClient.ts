@@ -91,7 +91,7 @@ export function createGscClient(opts: {
       // session is present, and auto-refreshes via the genericOAuth provider.
       // Works in every auth mode — self-hosted builds the same Better Auth
       // instance once BETTER_AUTH_SECRET is set.
-      result = await getAuth().api.getAccessToken({
+      result = await (await getAuth()).api.getAccessToken({
         body: {
           providerId: GSC_OAUTH_PROVIDER_ID,
           userId: opts.userId,
