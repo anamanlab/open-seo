@@ -160,7 +160,6 @@
     "@vitejs/plugin-react": "^6.1.2",
     "alchemy": "2.0.0-beta.61",
     "cf": "1.0.0-beta.14",
-    "chalk": "^5.6.2",
     "cheerio": "^1.2.0",
     "drizzle-kit": "^0.31.10",
     "effect": "4.0.0-beta.93",
