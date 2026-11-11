@@ -19,7 +19,9 @@ The existing `.greptile/` baseline remains; organization enforcement is unverifi
 
 The existing installation uses Access authentication and D1. Do not use Alchemy
 when the original `BETTER_AUTH_SECRET` is unavailable: it must remain an inherited
-Worker secret. Wrangler's required secrets configuration explicitly inherits
+Worker secret. This fork disables the legacy `deploy:selfhost` command and
+manual Alchemy workflow unconditionally; changing environment variable names
+cannot bypass that guard. Wrangler's required secrets configuration explicitly inherits
 existing secrets and refuses to deploy if one is missing.
 
 1. Save current Worker settings, custom domains, active version, and code in a
