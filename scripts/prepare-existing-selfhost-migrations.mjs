@@ -25,7 +25,7 @@ export function prepareMigrationSql(backup, migrations) {
     const sql = pending
       .map(
         ({ name, sql }) =>
-          `${sql}\n;\nINSERT INTO d1_migrations (id, name, applied_at) VALUES (${quote(randomUUID())}, ${quote(name)}, ${quote(new Date().toISOString())});\n`,
+          `${sql.trimEnd()}\nINSERT INTO d1_migrations (id, name, applied_at) VALUES (${quote(randomUUID())}, ${quote(name)}, ${quote(new Date().toISOString())});\n`,
       )
       .join("\n");
     database.exec(sql);

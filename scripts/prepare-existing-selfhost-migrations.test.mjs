@@ -13,6 +13,7 @@ test("applies only pending migrations and supplies Alchemy's required ledger fie
   ];
   const result = prepareMigrationSql(backup, migrations);
   assert.equal(result.count, 1);
+  assert.doesNotMatch(result.sql, /;\s*;/);
   const db = new DatabaseSync(":memory:");
   try {
     db.exec(backup + result.sql);
