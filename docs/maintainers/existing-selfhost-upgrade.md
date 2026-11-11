@@ -35,7 +35,12 @@ existing secrets and refuses to deploy if one is missing.
    and existing workflow names. It adds the upstream rate limits and browser binding.
 5. Dry-run each generated config with `pnpm exec wrangler deploy --config <path>
 --dry-run`. Keep output private because binding values appear in Wrangler logs.
-6. After checks pass, apply pending D1 migrations through the prepared main config.
+6. The Alchemy ledger requires explicit `id`, `name`, and `applied_at` fields.
+   Run `node scripts/prepare-existing-selfhost-migrations.mjs <private-backup.sql>
+<private-pending.sql>` to rehearse and prepare the import. Confirm the live
+   ledger still matches the backup, then run `pnpm exec wrangler d1 execute DB
+--remote --config <prepared-main-config> --file <private-pending.sql>`.
+   Do not use `wrangler d1 migrations apply` with this ledger.
    Deploy the audit Worker first, using a private secrets file containing the
    original DataForSEO key and any configured audit-only credentials. Never copy
    Google/authentication secrets to the audit Worker. Deploy the app config next.
