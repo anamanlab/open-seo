@@ -1,33 +1,19 @@
-import type { PlanStatus } from "@/client/features/billing/plan-detection";
-
-export function getBillingRouteState(args: {
-  hasSession: boolean;
-  isSessionPending: boolean;
-  isCustomerLoading: boolean;
-  isCustomerError: boolean;
-}) {
-  if (args.isSessionPending || !args.hasSession || args.isCustomerLoading) {
-    return "loading" as const;
-  }
-
-  if (args.isCustomerError) {
-    return "error" as const;
-  }
-
-  return "ready" as const;
-}
+import type { PlanStatus } from "@/shared/billing";
 
 export function getSubscribeRouteState(args: {
-  hasSession: boolean;
   isCustomerLoading: boolean;
   isCustomerError: boolean;
+  hasCustomerData: boolean;
   hasManagedAccess: boolean;
   planStatus: PlanStatus;
   isUpgradeFlow: boolean;
+  /** A paying customer on a monthly plan who came to change it, from
+   *  Billing or a pricing-page plan link. */
+  isPlanChange: boolean;
   checkoutCompleted: boolean;
   finalizingTimedOut: boolean;
 }) {
-  if (!args.hasSession || args.isCustomerLoading) {
+  if (args.isCustomerLoading) {
     return "loading" as const;
   }
 
@@ -39,12 +25,23 @@ export function getSubscribeRouteState(args: {
     return "redirectToApp" as const;
   }
 
-  if (args.isCustomerError) {
+  // A failed poll while finalizing keeps polling: the error screen would stop
+  // the poll and park a just-paid user on "Billing unavailable". A failed
+  // refetch with the customer already loaded keeps the paywall, since every
+  // Upgrade button in the app lands here.
+  if (
+    args.isCustomerError &&
+    !args.checkoutCompleted &&
+    !args.hasCustomerData
+  ) {
     return "error" as const;
   }
 
+  // The return from checkout goes into the app even for a plan change.
   if (args.planStatus === "paid") {
-    return "redirectToApp" as const;
+    return args.isPlanChange && !args.checkoutCompleted
+      ? ("changePlan" as const)
+      : ("redirectToApp" as const);
   }
 
   // Back from Stripe but Autumn hasn't reflected the subscription yet — poll

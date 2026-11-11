@@ -1,16 +1,15 @@
-import {
-  AiOptimizationApi,
-  AppendixApi,
-  BacklinksApi,
-  BusinessDataApi,
-  DataforseoLabsApi,
-  KeywordsDataApi,
-  OnPageApi,
-  SerpApi,
-} from "dataforseo-client";
+import { gatewayRefusal } from "@every-app/sdk/server";
 import { AppError } from "@/server/lib/errors";
-import { getRequiredEnvValue } from "@/server/lib/runtime-env";
 import type { ErrorCode } from "@/shared/error-codes";
+import { DATAFORSEO_NOT_SET_UP_MESSAGE } from "@/shared/gateway-setup-messages";
+import { getDataforseoFetch } from "@/server/lib/provider-access";
+// No runtime cycle: envelope.ts imports only the DataforseoErrorClassifier
+// type from here.
+import {
+  warnIfUpstreamResponseFailed,
+  type DataforseoResponseLike,
+  type DataforseoTaskLike,
+} from "@/server/lib/dataforseo/envelope";
 
 const API_BASE = "https://api.dataforseo.com";
 const MAX_DATAFORSEO_ERROR_PAYLOAD_LENGTH = 1600;
@@ -60,27 +59,116 @@ function formatDataforseoRequestPath(url: RequestInfo): string {
 }
 
 /**
- * The single authenticated `fetch` used by every DataForSEO SDK call. Throws on
- * non-2xx so the SDK's own `ApiException` path never fires; task-level failures
- * (which return HTTP 200) are handled downstream by {@link assertOk}. An
- * optional classifier maps recognised HTTP failures to product errors.
+ * A refusal the Every App gateway made itself (the app doesn't ask for
+ * DataForSEO, the gateway has no key, the call names no organization), as
+ * opposed to DataForSEO's own answer
+ * passed through, as OpenSEO's error; null for DataForSEO's answer.
+ *
+ * A missing key gets OpenSEO's own sentence as the message: rank checks store
+ * error.message and the MCP tools answer with it, and the gateway's wording
+ * is its operator's. The gateway's text stays in the details.
+ */
+async function gatewayRefusalError(response: Response) {
+  const refusal = await gatewayRefusal(response);
+  if (!refusal) return null;
+  const details = {
+    provider: "dataforseo",
+    gatewayError: refusal.code,
+    gatewayMessage: refusal.message,
+  };
+  if (refusal.code === "integration_not_configured") {
+    return new AppError(
+      "DATAFORSEO_AUTH_FAILED",
+      DATAFORSEO_NOT_SET_UP_MESSAGE,
+      details,
+    );
+  }
+  return new AppError("AUTH_CONFIG_MISSING", refusal.message, details);
+}
+
+/**
+ * A DataForSEO response body as text, inflated first if it is still gzip.
+ * The first two bytes decide, not Content-Encoding: runtimes that already
+ * decoded the body keep that header, so trusting it would inflate twice.
+ */
+export async function readDataforseoText(response: Response): Promise<string> {
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (bytes[0] !== 0x1f || bytes[1] !== 0x8b) {
+    return new TextDecoder().decode(bytes);
+  }
+  const inflated = new Blob([bytes])
+    .stream()
+    .pipeThrough(new DecompressionStream("gzip"));
+  return new Response(inflated).text();
+}
+
+/** A request-deadline abort as UPSTREAM_UNAVAILABLE; any other error as is. */
+function asDataforseoTimeoutError(error: unknown, url: RequestInfo): unknown {
+  if (
+    !(error instanceof Error) ||
+    (error.name !== "TimeoutError" && error.name !== "AbortError")
+  )
+    return error;
+  const path = formatDataforseoRequestPath(url);
+  // Non-reportable, so the error handlers won't log it: warn to keep timeouts
+  // visible in Workers Observability.
+  console.warn("dataforseo.upstream-timeout", {
+    event: "dataforseo.upstream-timeout",
+    path,
+  });
+  const timeoutError = new AppError(
+    "UPSTREAM_UNAVAILABLE",
+    `DataForSEO request timed out on ${path}`,
+    { provider: "dataforseo", providerPath: path },
+  );
+  timeoutError.name = "DataForSEOTimeoutError";
+  return timeoutError;
+}
+
+/**
+ * The single authenticated `fetch` used by every DataForSEO call. Throws on
+ * non-2xx; task-level failures (which return HTTP 200) are handled downstream
+ * by {@link assertOk}. An optional classifier maps recognised HTTP failures to
+ * product errors.
  */
 function createAuthenticatedFetch(
   classify?: DataforseoErrorClassifier,
   maxServerErrorRetries = DATAFORSEO_MAX_RETRIES,
 ) {
   return async (url: RequestInfo, init?: RequestInit): Promise<Response> => {
-    const apiKey = await getRequiredEnvValue("DATAFORSEO_API_KEY");
-    const headers = new Headers(init?.headers);
-    headers.set("Authorization", `Basic ${apiKey}`);
+    const providerFetch = await getDataforseoFetch();
     // Resolve the signal once so retries share the overall request timeout
     // rather than restarting a fresh 60s budget on each attempt.
     const signal =
       init?.signal ?? AbortSignal.timeout(DATAFORSEO_REQUEST_TIMEOUT_MS);
+    // Ask for gzip explicitly: the Docker edition's runtime sends no
+    // Accept-Encoding, so DataForSEO answers uncompressed (~9.9 MB vs ~0.6 MB
+    // for the US location list) and slow links hit the timeout. That runtime
+    // then leaves the body gzipped, so read it with readDataforseoText.
+    const headers = new Headers(init?.headers);
+    if (!headers.has("Accept-Encoding")) headers.set("Accept-Encoding", "gzip");
 
     for (let attempt = 0; ; attempt++) {
-      const response = await fetch(url, { ...init, headers, signal });
+      let response: Response;
+      try {
+        response = await providerFetch(url, { ...init, headers, signal });
+      } catch (error) {
+        // Both abort flavours mean "we ran out of time", and neither carries a
+        // useful name of its own: the shared budget above rejects with
+        // TimeoutError, while Lighthouse passes its own AbortController
+        // deadline via init.signal and rejects with AbortError. Classify them
+        // so callers get a provider-degradation error instead of an anonymous
+        // internal one. Deliberately not retried: a call that ran past the
+        // deadline may already be billed by DataForSEO, and because this is not
+        // a DataforseoChargedTaskError the customer is metered nothing for it,
+        // so replaying would be spend we eat twice.
+        throw asDataforseoTimeoutError(error, url);
+      }
       if (response.ok) return response;
+
+      // A gateway refusal: retrying can't fix it.
+      const refused = await gatewayRefusalError(response);
+      if (refused) throw refused;
 
       // Transient upstream 5xx on an idempotent read -> back off and retry.
       if (response.status >= 500 && attempt < maxServerErrorRetries) {
@@ -90,11 +178,12 @@ function createAuthenticatedFetch(
         continue;
       }
 
-      const rawText = await response.text();
+      const rawText = await readDataforseoText(response);
       const path = formatDataforseoRequestPath(url);
       const classified = classify?.(response.status, rawText, path);
       if (classified) throw classified;
 
+      // An unverified account (status_code 40104) answers with 403, not 401.
       const code: ErrorCode =
         response.status === 402
           ? "DATAFORSEO_BILLING_ISSUE"
@@ -102,7 +191,7 @@ function createAuthenticatedFetch(
             ? "UPSTREAM_UNAVAILABLE"
             : response.status === 429
               ? "RATE_LIMITED"
-              : response.status === 401
+              : response.status === 401 || response.status === 403
                 ? "DATAFORSEO_AUTH_FAILED"
                 : "INTERNAL_ERROR";
       const error = new AppError(
@@ -116,35 +205,117 @@ function createAuthenticatedFetch(
         },
       );
       error.name = "DataForSEOHttpError";
+      // UPSTREAM_UNAVAILABLE is non-reportable, and the error handlers only log
+      // what they capture, so warn here to keep the provider's failure rate
+      // visible in Workers Observability. Warn, not error: there is nothing in
+      // the app to fix.
+      if (code === "UPSTREAM_UNAVAILABLE")
+        console.warn("dataforseo.upstream-http-failed", {
+          event: "dataforseo.upstream-http-failed",
+          path,
+          status: response.status,
+        });
       throw error;
     }
   };
 }
 
-function http(
-  classify?: DataforseoErrorClassifier,
-  maxServerErrorRetries = DATAFORSEO_MAX_RETRIES,
-) {
-  return { fetch: createAuthenticatedFetch(classify, maxServerErrorRetries) };
+type DataforseoRequestOptions = {
+  /** Maps a recognised access / billing HTTP failure to a product error. */
+  classify?: DataforseoErrorClassifier;
+  /**
+   * Set 0 for billed, non-idempotent calls (business task_post, Lighthouse):
+   * a 5xx does not prove the provider skipped the charge, so those must never
+   * be replayed. Defaults to retrying idempotent reads on transient 5xx.
+   */
+  maxServerErrorRetries?: number;
+  /** The sandbox host validates requests like production at zero cost. */
+  baseUrl?: string;
+  signal?: AbortSignal;
+};
+
+async function requestDataforseo<TTask extends DataforseoTaskLike>(
+  method: "GET" | "POST",
+  path: string,
+  body: unknown,
+  options: DataforseoRequestOptions,
+): Promise<DataforseoResponseLike<TTask> | null> {
+  const doFetch = createAuthenticatedFetch(
+    options.classify,
+    options.maxServerErrorRetries,
+  );
+  const url = `${options.baseUrl ?? API_BASE}${path}`;
+  const response = await doFetch(url, {
+    method,
+    headers: {
+      Accept: "application/json",
+      ...(method === "POST" ? { "Content-Type": "application/json" } : {}),
+    },
+    body: method === "POST" ? JSON.stringify(body) : undefined,
+    signal: options.signal,
+  });
+  // The deadline also covers the body: a slow response can send its headers
+  // in time and still run out the clock while the body streams in.
+  let text: string;
+  try {
+    text = await readDataforseoText(response);
+  } catch (error) {
+    throw asDataforseoTimeoutError(error, url);
+  }
+  if (text === "") return null;
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the task type is the caller's claim about the payload; billing metadata and item fields are validated downstream (envelope.ts + section Zod schemas)
+  const parsed = JSON.parse(text) as DataforseoResponseLike<TTask>;
+  warnIfUpstreamResponseFailed(parsed, path);
+  return parsed;
 }
 
-// Per-section API factories. Each is created per-request so the auth secret is
-// read lazily (it lives in the Worker env, not in module scope).
-export const labsApi = () => new DataforseoLabsApi(API_BASE, http());
-export const keywordsDataApi = () => new KeywordsDataApi(API_BASE, http());
-export const serpApi = () => new SerpApi(API_BASE, http());
-export const businessDataApi = () => new BusinessDataApi(API_BASE, http());
-// task_post creates a billed task. A 5xx does not prove the provider skipped
-// the charge, so this client must not replay it (same rule as Lighthouse).
-export const businessDataTaskApi = () =>
-  new BusinessDataApi(API_BASE, http(undefined, 0));
-// Lighthouse live is a billed, non-idempotent POST. A 5xx does not prove the
-// provider skipped the charge, so this client must not replay it.
-export const onPageApi = () => new OnPageApi(API_BASE, http(undefined, 0));
-// Account/appendix data (spend, balance, rates). userData() is FREE ($0) and
-// read-only — do NOT wire it through metering.
-export const appendixApi = () => new AppendixApi(API_BASE, http());
-export const backlinksApi = (classify?: DataforseoErrorClassifier) =>
-  new BacklinksApi(API_BASE, http(classify));
-export const aiOptimizationApi = (classify?: DataforseoErrorClassifier) =>
-  new AiOptimizationApi(API_BASE, http(classify));
+/**
+ * POST `tasks` (the standard array-of-task-payloads body) to a DataForSEO
+ * endpoint and return the parsed response envelope. The task type parameter is
+ * the caller's claim about the payload shape — fields we act on are validated
+ * downstream (billing metadata in envelope.ts, items via the section fetchers'
+ * Zod schemas). Auth is read per-call from the Worker env.
+ */
+export function dataforseoPost<
+  TTask extends DataforseoTaskLike = DataforseoTaskLike,
+>(
+  path: string,
+  tasks: unknown[],
+  options: DataforseoRequestOptions = {},
+): Promise<DataforseoResponseLike<TTask> | null> {
+  return requestDataforseo("POST", path, tasks, options);
+}
+
+/**
+ * POST like {@link dataforseoPost} but return the UN-CONSUMED Response
+ * (headers only) — the same auth, retry policy, and HTTP-error ladder apply.
+ * For the one endpoint whose body is too big to read eagerly: Lighthouse
+ * gates its multi-MB body reads behind a parse lock in the audit worker, and
+ * passes its own `signal` so the timeout can be cleared once headers arrive.
+ */
+export function dataforseoPostResponse(
+  path: string,
+  tasks: unknown[],
+  options: DataforseoRequestOptions & { signal?: AbortSignal } = {},
+): Promise<Response> {
+  const doFetch = createAuthenticatedFetch(
+    options.classify,
+    options.maxServerErrorRetries,
+  );
+  return doFetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify(tasks),
+    signal: options.signal,
+  });
+}
+
+/** GET a DataForSEO endpoint (task_get collection, appendix/locations data). */
+export function dataforseoGet<
+  TTask extends DataforseoTaskLike = DataforseoTaskLike,
+>(
+  path: string,
+  options: DataforseoRequestOptions = {},
+): Promise<DataforseoResponseLike<TTask> | null> {
+  return requestDataforseo("GET", path, undefined, options);
+}

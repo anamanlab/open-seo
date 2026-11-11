@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { getStandardErrorMessage } from "@/client/lib/error-messages";
-import { isHostedClientAuthMode } from "@/lib/auth-mode";
+import { Alert, AlertDescription } from "@/client/components/ui/alert";
+import { Button } from "@/client/components/ui/button";
+import { usesBetterAuthClient } from "@/lib/auth-mode";
 import {
   getWorkspaceMergeStatus,
   mergeLegacyWorkspaces,
@@ -17,26 +18,19 @@ export function WorkspaceMergeBanner() {
   const statusQuery = useQuery({
     queryKey: ["workspaceMergeStatus"],
     queryFn: () => getWorkspaceMergeStatus(),
-    enabled: !isHostedClientAuthMode(),
+    enabled: !usesBetterAuthClient(),
   });
 
   const mergeMutation = useMutation({
     mutationFn: () => mergeLegacyWorkspaces(),
     onSuccess: ({ mergedWorkspaces }) => {
       toast.success(
-        `Migrated ${mergedWorkspaces} workspace${mergedWorkspaces === 1 ? "" : "s"} into the shared workspace.`,
+        `Migrated ${mergedWorkspaces} organization${mergedWorkspaces === 1 ? "" : "s"} into the shared organization.`,
       );
       // The merge changes projects, connections, and the banner's own status —
       // refetch everything rather than enumerating keys.
       void queryClient.invalidateQueries();
     },
-    onError: (error) =>
-      toast.error(
-        getStandardErrorMessage(
-          error,
-          "Couldn't migrate the workspaces. Try again.",
-        ),
-      ),
   });
 
   if (!statusQuery.data || statusQuery.data.legacyWorkspaceCount === 0) {
@@ -44,21 +38,21 @@ export function WorkspaceMergeBanner() {
   }
 
   return (
-    <div className="rounded-xl border border-warning/40 bg-warning/10 p-5">
-      <p className="max-w-3xl text-sm">
+    <Alert variant="warning" className="p-5">
+      <AlertDescription className="max-w-3xl text-foreground">
         When self-hosting on Cloudflare, there was a bug where each user had
         their own workspace. It was intended for all users to be in one
         workspace. Clicking the button below will migrate everyone&apos;s
         previous work into this shared workspace.
-      </p>
-      <button
-        type="button"
-        className="btn btn-primary btn-sm mt-4"
-        disabled={mergeMutation.isPending}
+      </AlertDescription>
+      <Button
+        size="sm"
+        className="mt-4 justify-self-start"
+        pending={mergeMutation.isPending}
         onClick={() => mergeMutation.mutate()}
       >
-        {mergeMutation.isPending ? "Migrating…" : "Migrate workspaces"}
-      </button>
-    </div>
+        {mergeMutation.isPending ? "Migrating…" : "Migrate organizations"}
+      </Button>
+    </Alert>
   );
 }

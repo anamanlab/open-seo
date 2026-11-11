@@ -5,6 +5,11 @@ import { AppError } from "@/server/lib/errors";
 import { createGa4AdminClient } from "@/server/lib/ga4Client";
 import { Ga4AdminApiError, Ga4TokenError } from "@/server/lib/ga4Errors";
 import { GA4_OAUTH_PROVIDER_ID } from "@/shared/ga4";
+import { getGoogleAccessMode } from "@/server/features/google/googleAccess";
+import {
+  GATEWAY_GOOGLE_ACCOUNT_ID,
+  getGatewayGoogleStatus,
+} from "@/server/features/google/gatewayGoogle";
 import {
   Ga4ConnectionRepository,
   type Ga4Connection,
@@ -14,7 +19,19 @@ async function getConnection(projectId: string): Promise<Ga4Connection | null> {
   return Ga4ConnectionRepository.getByProjectId(projectId);
 }
 
+/** Behind the gateway a member's one account is their gateway connection (gatewayGoogle.ts). */
 async function listGrantsForUser(userId: string) {
+  if ((await getGoogleAccessMode()) === "gateway") {
+    return (await getGatewayGoogleStatus()).connected
+      ? [
+          {
+            id: GATEWAY_GOOGLE_ACCOUNT_ID,
+            accountId: GATEWAY_GOOGLE_ACCOUNT_ID,
+            refreshTokenExpiresAt: null,
+          },
+        ]
+      : [];
+  }
   return db
     .select({
       id: account.id,
@@ -66,7 +83,7 @@ async function listPropertiesForUserWithGrantStatus(userId: string) {
         const reconnect =
           requiresReconnect(error) ||
           (error instanceof Ga4TokenError &&
-            grant.refreshTokenExpiresAt !== null &&
+            grant.refreshTokenExpiresAt != null &&
             grant.refreshTokenExpiresAt.getTime() <= Date.now());
         if (!reconnect) {
           console.error("ga4.property_discovery_failed", {
@@ -138,41 +155,8 @@ async function setProperty(input: {
   });
 }
 
-async function unlinkUserGrant(
-  userId: string,
-  ga4AccountId: string,
-): Promise<void> {
-  await db
-    .delete(account)
-    .where(
-      and(
-        eq(account.userId, userId),
-        eq(account.providerId, GA4_OAUTH_PROVIDER_ID),
-        eq(account.accountId, ga4AccountId),
-      ),
-    );
-}
-
-async function disconnect(input: {
-  projectId: string;
-  userId: string;
-}): Promise<void> {
-  const connection = await Ga4ConnectionRepository.getByProjectId(
-    input.projectId,
-  );
+async function disconnect(input: { projectId: string }): Promise<void> {
   await Ga4ConnectionRepository.deleteByProjectId(input.projectId);
-  if (
-    connection?.ga4AccountId &&
-    connection.connectedByUserId === input.userId
-  ) {
-    const stillUsed = await Ga4ConnectionRepository.existsForConnectorAccount(
-      input.userId,
-      connection.ga4AccountId,
-    );
-    if (!stillUsed) {
-      await unlinkUserGrant(input.userId, connection.ga4AccountId);
-    }
-  }
 }
 
 export const Ga4Service = {

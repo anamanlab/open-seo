@@ -46,6 +46,9 @@ const customSectionSlugSchema = z
   .regex(
     /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
     "Use a lowercase slug like 'launch-plan'",
+  )
+  .describe(
+    "Lowercase letters and digits separated by hyphens, e.g. 'launch-plan'. No underscores or spaces. Use the same slug to edit or delete the section.",
   );
 
 export const CUSTOM_SECTION_KEY_PREFIX = "custom:";
@@ -71,6 +74,8 @@ const keyPageInputSchema = z.object({
 // Content length and per-project row caps are NOT enforced here — the service
 // owns them so every writer (server fn, MCP tool, SAM) hits the same limits.
 const projectContextUpdateSchema = z.union([
+  // An empty string goes back to using the project name.
+  z.strictObject({ brandName: z.string().trim().max(120) }),
   z.strictObject({
     section: projectContextSectionKeySchema,
     // An empty string clears the section.

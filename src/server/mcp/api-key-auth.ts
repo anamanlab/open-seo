@@ -1,11 +1,17 @@
+import { z } from "zod";
 import { getAuth, getHostedBaseUrl } from "@/lib/auth";
 import { API_KEY_PREFIX } from "@/lib/auth-api-key";
 import { MCP_OAUTH_SCOPES } from "@/lib/oauth-resource";
-import { getOrCreateDefaultHostedOrganization } from "@/server/auth/default-hosted-organization";
 import { AuthRepository } from "@/server/auth/repositories/AuthRepository";
 import { recordMcpAuthorized } from "@/server/features/activation/mcpActivation";
 import { createWorkersOAuthMcpProps, MCP_ROUTE } from "@/server/mcp/context";
-import { handleAuthenticatedOpenSeoMcpRequest } from "@/server/mcp/transport";
+
+// Stamped server-side at creation by the /api-key/create before hook in
+// lib/auth.ts (and backfilled for older keys by migration), never by the
+// client. The plugin stores it as JSON text and parses it on read.
+const apiKeyMetadataSchema = z.looseObject({
+  organizationId: z.string().min(1),
+});
 
 function getApiKey(request: Request) {
   // Both branches require the oseo_ prefix: anything else (a Cloudflare OAuth
@@ -29,6 +35,7 @@ function apiKeyErrorResponse(
 
   const isLimited =
     error?.code === "RATE_LIMITED" || error?.code === "USAGE_EXCEEDED";
+  const isForbidden = error?.code === "FORBIDDEN";
   if (isLimited) {
     // The plugin reports tryAgainIn (milliseconds) for RATE_LIMITED, but its
     // published error type omits `details`, so narrow at runtime.
@@ -49,13 +56,19 @@ function apiKeyErrorResponse(
     ? error?.code === "RATE_LIMITED"
       ? "rate_limited"
       : "usage_exceeded"
-    : "invalid_api_key";
+    : isForbidden
+      ? "account_access_revoked"
+      : "invalid_api_key";
   const description = isLimited
     ? typeof error?.message === "string"
       ? error.message
       : "API key request limit reached"
-    : "The provided API key is invalid, expired, or disabled";
-  const status = isLimited ? 429 : 401;
+    : isForbidden
+      ? typeof error?.message === "string"
+        ? error.message
+        : "This API key is no longer associated with an organization"
+      : "The provided API key is invalid, expired, or disabled";
+  const status = isLimited ? 429 : isForbidden ? 403 : 401;
 
   // Bad credentials are client-side noise, so 401 logs at debug (mirroring the
   // OAuth path); a 429 means we actually cut a caller off, so warn.
@@ -95,18 +108,48 @@ export async function handleMcpApiKeyRequest(
     }
 
     const userId = result.key.referenceId;
+
+    // Per-user request throttle. The binding is declared in deploy/alchemy/alchemy.run.ts
+    // (hosted prod only); local dev and self-host run without it and skip
+    // limiting, which is fine single-user. This replaces the better-auth
+    // plugin limiter, whose broken idle-gap window hard-blocked active MCP
+    // clients (see lib/auth-api-key.ts). Cloudflare's counter is per-colo
+    // best-effort, which is all this needs to be: credits bound spend, this
+    // bounds runaway request volume.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the binding is declared as a rate limiter in deploy/alchemy/alchemy.run.ts; absent outside hosted prod
+    const rateLimit = (env as { MCP_RATE_LIMIT?: RateLimit }).MCP_RATE_LIMIT;
+    if (rateLimit) {
+      const { success } = await rateLimit.limit({ key: userId });
+      if (!success) {
+        return apiKeyErrorResponse({
+          code: "RATE_LIMITED",
+          message: "Rate limit exceeded: 5000 requests per minute",
+          details: { tryAgainIn: 60_000 },
+        });
+      }
+    }
+
     const user = await AuthRepository.getHostedUser(userId);
     if (!user?.email) return apiKeyErrorResponse(null);
 
-    // API keys bill the user's default hosted workspace (their first org).
-    // The hosted product provisions exactly one org per user. Decided
-    // direction for multi-org: keys stay user-scoped and the org derives from
-    // the project each tool call names (project-level authz) — not key→org
-    // binding.
-    const organizationId = await getOrCreateDefaultHostedOrganization(
-      userId,
-      (body) => authApi.createOrganization({ body }),
-    );
+    // A key is bound to the organization that was active when it was created
+    // and bills that org. The member row is the authorization fact, re-read
+    // per request so removing a member kills their keys immediately; the role
+    // is never stored on the key. A key with no organization predates the
+    // binding and was not backfilled, so it fails the same way rather than
+    // being rebound to some other org.
+    const organizationId = apiKeyMetadataSchema.safeParse(result.key.metadata)
+      .data?.organizationId;
+    const membership = organizationId
+      ? await AuthRepository.getMembership(userId, organizationId)
+      : null;
+    if (!organizationId || !membership) {
+      return apiKeyErrorResponse({
+        code: "FORBIDDEN",
+        message:
+          "This API key's organization access was revoked. Create a new key in Settings.",
+      });
+    }
 
     // clientId "api_key" satisfies the hosted transport's fail-closed props
     // schema and counts these calls as external MCP clients in telemetry.
@@ -114,6 +157,7 @@ export async function handleMcpApiKeyRequest(
       userId,
       userEmail: user.email,
       organizationId,
+      role: membership.role,
       baseUrl: getHostedBaseUrl(),
       scopes: [...MCP_OAUTH_SCOPES],
       clientId: "api_key",
@@ -121,6 +165,8 @@ export async function handleMcpApiKeyRequest(
 
     await recordMcpAuthorized(organizationId);
 
+    const { handleAuthenticatedOpenSeoMcpRequest } =
+      await import("@/server/mcp/transport");
     return await handleAuthenticatedOpenSeoMcpRequest(request, props, env, ctx);
   } catch (error) {
     // Without this, a throw here surfaces as a bare platform 500 with no log

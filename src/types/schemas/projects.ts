@@ -57,23 +57,17 @@ export const updateProjectSchema = z
   .object({
     projectId: z.string().min(1),
     name: projectNameField,
+    // Saved with a rename to keep tracking the old name. Omitted leaves it as it is.
+    brandName: z.string().trim().min(1).max(120).optional(),
     domain: projectDomainField,
     locationCode: projectLocationCodeField,
     languageCode: projectLanguageCodeField,
   })
   .refine(hasLocationForLanguage, marketPairMessage);
 
-// Domain on its own, for the dashboard hero's inline input. Same loose shape
-// as updateProjectSchema's domain field, but required.
-export const setProjectDomainSchema = z.object({
+export const setProjectWebsiteSchema = z.object({
   projectId: z.string().min(1),
   domain: z.string().trim().min(1).max(255),
-});
-
-// Market-only update (onboarding). Both halves are required: the caller picks
-// them together, so the service can validate the pair without a stored row.
-export const setProjectMarketSchema = z.object({
-  projectId: z.string().min(1),
   locationCode: z
     .number()
     .int()
@@ -90,13 +84,13 @@ export const archiveProjectSchema = z.object({
 // Deliberately not named `projectId`: ensureUserMiddleware resolves any
 // `projectId` in input data against active projects and 404s on archived
 // ones before the handler runs.
-export const restoreProjectSchema = z.object({
+export const archivedProjectSchema = z.object({
   archivedProjectId: z.string().min(1),
 });
 
 export type CreateProjectInput = z.infer<typeof createProjectSchema>;
 export type UpdateProjectInput = z.infer<typeof updateProjectSchema>;
-export type SetProjectDomainInput = z.infer<typeof setProjectDomainSchema>;
-export type SetProjectMarketInput = z.infer<typeof setProjectMarketSchema>;
 export type ArchiveProjectInput = z.infer<typeof archiveProjectSchema>;
-export type RestoreProjectInput = z.infer<typeof restoreProjectSchema>;
+export type ArchivedProjectInput = z.infer<typeof archivedProjectSchema>;
+
+export type SetProjectWebsiteInput = z.infer<typeof setProjectWebsiteSchema>;

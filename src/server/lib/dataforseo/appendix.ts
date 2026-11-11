@@ -1,6 +1,57 @@
-import type { AppendixUserDataResultInfo } from "dataforseo-client";
-import { appendixApi } from "@/server/lib/dataforseo/core";
-import { assertOk } from "@/server/lib/dataforseo/envelope";
+import { z } from "zod";
+import { dataforseoGet, dataforseoPost } from "@/server/lib/dataforseo/core";
+import {
+  assertOk,
+  type DataforseoTaskLike,
+} from "@/server/lib/dataforseo/envelope";
+
+const gotoConversionsSchema = z.array(
+  z.object({ goto: z.string(), url: z.string().url().nullish() }),
+);
+
+/** DataForSEO's limit for one goto_url_converter request. */
+export const MAX_GOTO_URLS_PER_REQUEST = 100;
+
+/**
+ * The real page behind each google.com/goto URL, keyed by that URL. A URL
+ * DataForSEO couldn't resolve is left out. POST /v3/appendix/goto_url_converter
+ * is free, so like fetchUserData this is deliberately not metered.
+ */
+export async function resolveGotoUrls(
+  gotoUrls: string[],
+): Promise<Map<string, string>> {
+  const task = assertOk(
+    await dataforseoPost("/v3/appendix/goto_url_converter", [
+      { goto_urls: gotoUrls },
+    ]),
+  );
+  return new Map(
+    gotoConversionsSchema
+      .parse(task.result ?? [])
+      .flatMap(({ goto, url }) => (url ? [[goto, url] as const] : [])),
+  );
+}
+
+/**
+ * Account snapshot from the free GET /v3/appendix/user_data. Every field is
+ * optional on the wire; `money.statistics.day` / `.minute` group spend by
+ * function under `total_<function>` keys, so those stay untyped records.
+ */
+interface DataforseoUserData {
+  login?: string | null;
+  timezone?: string | null;
+  money?: {
+    total?: number | null;
+    balance?: number | null;
+    statistics?: {
+      day?: Record<string, unknown> | null;
+      minute?: Record<string, unknown> | null;
+      [key: string]: unknown;
+    } | null;
+    [key: string]: unknown;
+  } | null;
+  [key: string]: unknown;
+}
 
 /**
  * Reads account spend + balance from DataForSEO's free GET
@@ -13,14 +64,11 @@ import { assertOk } from "@/server/lib/dataforseo/envelope";
  * (remaining), and `money.statistics.day` / `.minute` — spend grouped by
  * function (serp, keywords_data, backlinks, dataforseo_labs, on_page,
  * business_data, …) for the rolling day / minute window.
- *
- * SDK types are loose (every field optional + index signatures), so callers
- * must optional-chain into `.money.statistics.day`; it can be undefined.
  */
-export async function fetchUserData(): Promise<
-  AppendixUserDataResultInfo | undefined
-> {
-  const response = await appendixApi().userData();
+export async function fetchUserData(): Promise<DataforseoUserData | undefined> {
+  const response = await dataforseoGet<
+    DataforseoTaskLike & { result?: DataforseoUserData[] }
+  >("/v3/appendix/user_data");
 
   // Validates top-level + task status; the call is free so there is no billing
   // envelope to build.

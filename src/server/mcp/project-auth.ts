@@ -12,9 +12,10 @@ async function requireProjectAccess(
 ) {
   const { baseUrl, ...auth } = toolContext.auth;
 
-  // Authorize the caller-supplied projectId against the token's organization.
-  // Assert on the result instead of relying on the lookup throwing, so this
-  // stays a hard gate even if the service's error behavior ever changes.
+  // Authorize the caller-supplied projectId against the credential's bound
+  // organization. Assert on the result instead of relying on the lookup
+  // throwing, so this stays a hard gate even if the service's error behavior
+  // ever changes.
   const project = await ProjectService.getProjectForOrganization(
     auth.organizationId,
     projectId,
