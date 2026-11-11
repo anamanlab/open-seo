@@ -49,8 +49,10 @@ existing secrets and refuses to deploy if one is missing.
    Google data, and MCP behavior through the existing Access gate.
 
 Upstream retires the onboarding chat and moves audit scratchpads into the audit
-Worker. The generated declarative exports preserve SAM and retire the two removed
-classes. Complete in-flight audits before deployment. D1 and account data remain.
+Worker. The generated declarative exports preserve SAM and the retired namespaces through
+unbound placeholder classes. Migration 0055 retains the three legacy audit detail
+columns instead of dropping them. Complete in-flight audits before deployment.
+D1 and account data remain.
 
-A code rollback does not undo database migrations or retired Durable Objects.
+A code rollback does not undo database migrations.
 Keep the previous version and private data backup until verification completes.

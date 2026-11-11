@@ -250,6 +250,10 @@ export { AiVisibilityWorkflow } from "./server/workflows/AiVisibilityWorkflow";
 export { LocalRankWorkflow } from "./server/workflows/LocalRankWorkflow";
 // Durable Object class for the SAM in-app agent (Agents SDK).
 export { SamChatAgent } from "./server/features/sam/SamChatAgent";
+export {
+  LegacyAuditScratchpad as AuditScratchpad,
+  LegacyOnboardingChatAgent as OnboardingChatAgent,
+} from "./server/legacy-durable-objects";
 
 // Daily OAuth KV garbage collection; must match a trigger in wrangler.jsonc.
 const MCP_OAUTH_PURGE_CRON = "17 3 * * *";

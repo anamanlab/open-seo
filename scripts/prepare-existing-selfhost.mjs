@@ -79,12 +79,12 @@ export function prepareConfigs(settings, domains, main, audit, workerName) {
           .map((item) => item.name),
       },
       // Alchemy-created namespaces have no Wrangler migration tag. Declarative
-      // exports retain SAM by class and retire only upstream-removed classes.
+      // exports retain existing namespaces by class, including retired ones.
       migrations: [],
       exports: {
         SamChatAgent: { type: "durable-object", storage: "sqlite" },
-        AuditScratchpad: { type: "durable-object", state: "deleted" },
-        OnboardingChatAgent: { type: "durable-object", state: "deleted" },
+        AuditScratchpad: { type: "durable-object", storage: "sqlite" },
+        OnboardingChatAgent: { type: "durable-object", storage: "sqlite" },
       },
       vars: { ...vars, AUDIT_BROWSER_RENDERING: "true" },
       routes: [
