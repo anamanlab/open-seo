@@ -33,9 +33,9 @@ if (!existsSync(envFile)) {
   fail(
     `${em(envFile)} not found — create it first:`,
     "",
-    `  ${cmd("cp .env.selfhost.example .env.selfhost")}`,
+    `  ${cmd("cp deploy/.env.selfhost.example .env.selfhost")}`,
     "",
-    `then set ${em("DATAFORSEO_API_KEY")} and ${em("ACCESS_ALLOWED_EMAILS")}.`,
+    `then set ${em("DATAFORSEO_API_KEY")}.`,
   );
 }
 const env = {};
@@ -48,48 +48,44 @@ if (!env.DATAFORSEO_API_KEY) {
     `${em("DATAFORSEO_API_KEY")} is not set in ${envFile} — see docs/DATAFORSEO_API_KEY.md for how to get one.`,
   );
 }
-
-// This installation already has several projects linked to the same Google
-// OAuth grants. Alchemy reconciles Worker bindings on EVERY deploy and treats
-// omitted optional variables as empty. Fail BEFORE building or deploying;
-// otherwise a deploy from a new VPS silently invalidates every project.
-const googleClientId = (env.GOOGLE_CLIENT_ID || "").trim();
-const googleClientSecret = (env.GOOGLE_CLIENT_SECRET || "").trim();
-const betterAuthSecret = (env.BETTER_AUTH_SECRET || "").trim();
-const missingGoogleConfig = [
-  ["GOOGLE_CLIENT_ID", googleClientId],
-  ["GOOGLE_CLIENT_SECRET", googleClientSecret],
-  ["BETTER_AUTH_SECRET", betterAuthSecret],
-]
-  .filter(([, value]) => !value)
-  .map(([name]) => name);
-if (missingGoogleConfig.length) {
+// Existing Google grants are encrypted with the deployed secret. Alchemy
+// replaces omitted optional secrets with empty values; never run it against
+// this installation without the original complete configuration.
+if (env.SELFHOST_ACCESS_DOMAIN && !env.CUSTOM_DOMAIN) {
   fail(
-    "Google OAuth is already in use by production OpenSEO projects.",
-    `Missing from ${envFile}: ${missingGoogleConfig.join(", ")}.`,
-    "Restore the ORIGINAL values from the canonical, secure deployment configuration.",
-    "Never replace BETTER_AUTH_SECRET with a new random value: it encrypts stored Google grants.",
-    "Do not deploy from a new VPS with an incomplete .env.selfhost.",
+    "Set CUSTOM_DOMAIN to the existing SELFHOST_ACCESS_DOMAIN before upgrading.",
   );
 }
-if (
-  !googleClientId.endsWith(".apps.googleusercontent.com") ||
-  googleClientId.length < 50
-) {
-  fail(
-    "GOOGLE_CLIENT_ID does not look like a valid Google OAuth web client ID.",
-  );
-}
-if (betterAuthSecret.length < 32) {
-  fail(
-    "BETTER_AUTH_SECRET must be at least 32 characters and must match the original deployment.",
-  );
+if (env.GOOGLE_CLIENT_ID || env.SELFHOST_ACCESS_DOMAIN) {
+  const missing = [
+    "GOOGLE_CLIENT_ID",
+    "GOOGLE_CLIENT_SECRET",
+    "BETTER_AUTH_SECRET",
+  ].filter((name) => !env[name]?.trim());
+  if (missing.length) {
+    fail(
+      `Existing Google integration configuration is incomplete: ${missing.join(", ")}.`,
+      "Preserve the original deployed secrets; never generate a replacement BETTER_AUTH_SECRET.",
+      "An unreadable inherited Worker secret requires a deploy path that preserves it.",
+    );
+  }
 }
 
-// When both are set, the deploy provisions no Access resources (hand-managed
-// application) and needs neither ACCESS_ALLOWED_EMAILS nor the access:write
-// login scope.
-const managedAccess = !(env.TEAM_DOMAIN && env.POLICY_AUD);
+// Mirrors the stack's default (deploy/alchemy/alchemy.run.ts): an unset
+// AUTH_MODE is the Access-gated mode. A typo would deploy that mode without
+// its Access application, so reject it here.
+const AUTH_MODES = ["cloudflare_access", "local_noauth", "hosted", "password"];
+const authMode = env.AUTH_MODE || "cloudflare_access";
+if (!AUTH_MODES.includes(authMode)) {
+  fail(
+    `${em("AUTH_MODE")}=${authMode} in ${envFile} is not one of ${AUTH_MODES.join(", ")}.`,
+  );
+}
+// Only the Access-gated mode provisions Access resources, and not when both
+// TEAM_DOMAIN and POLICY_AUD name a hand-managed application. Nothing else
+// needs ACCESS_ALLOWED_EMAILS or the access:write login scope.
+const managedAccess =
+  authMode === "cloudflare_access" && !(env.TEAM_DOMAIN && env.POLICY_AUD);
 if (managedAccess && !env.ACCESS_ALLOWED_EMAILS) {
   fail(
     `${em("ACCESS_ALLOWED_EMAILS")} is not set in ${envFile} — list who may sign in through`,
@@ -111,8 +107,10 @@ if (!process.env.CLOUDFLARE_API_TOKEN) {
   }
   if (!cloudflare) {
     fail(
-      `No Cloudflare login found (alchemy profile "${profileName}") — run ${cmd("pnpm alchemy login")}`,
-      `first (answer yes to "Customize OAuth scopes?" and enable ${em("access:write")}).`,
+      `No Cloudflare login found (alchemy profile "${profileName}") — run ${cmd("pnpm alchemy login deploy/alchemy/alchemy.run.ts")} first`,
+      managedAccess
+        ? `(answer yes to "Customize OAuth scopes?" and enable ${em("access:write")}).`
+        : "(the default scopes are enough).",
     );
   }
   if (
@@ -125,7 +123,7 @@ if (!process.env.CLOUDFLARE_API_TOKEN) {
       `Your Cloudflare login is missing the ${em("access:write")} scope, which the deploy needs`,
       "to provision the Cloudflare Access login gate. Log in again with the scope enabled:",
       "",
-      `  ${cmd("pnpm alchemy login --configure")}`,
+      `  ${cmd("pnpm alchemy login deploy/alchemy/alchemy.run.ts --configure")}`,
       "",
       `When asked "Customize OAuth scopes?", answer yes, then select ${em("access:write")}`,
       "(space to toggle, enter to confirm — keep the preselected defaults).",

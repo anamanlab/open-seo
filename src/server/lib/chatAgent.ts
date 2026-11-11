@@ -1,16 +1,16 @@
 import type { LanguageModelV3 } from "@openrouter/ai-sdk-provider";
 import { subscribe } from "agents/observability";
-import { createUIMessageStream, createUIMessageStreamResponse } from "ai";
 import { z } from "zod";
+import { isHostedServerAuthMode } from "@/server/lib/runtime-env";
 
-// The chat agents' most common failure modes — a provider stream dying
+// The chat agent's most common failure modes — a provider stream dying
 // mid-turn ("chat:request:failed", stage "stream") and a DO restart whose
 // recovery gives up ("chat:recovery:exhausted") — never reach an onChatError
 // hook; their only signal is the agents:chat diagnostics channel, which is
 // silent without a subscriber. This module-level subscription puts them in
-// the Workers logs for every chat DO in the isolate (SAM + onboarding). The
-// user-visible residue of these is the replayed "Something went wrong"
-// banner plus a partially-streamed assistant message.
+// the Workers logs for every chat DO in the isolate. The user-visible residue
+// of these is the replayed "Something went wrong" banner plus a
+// partially-streamed assistant message.
 subscribe("chat", (event) => {
   if (
     event.type === "chat:request:failed" ||
@@ -25,8 +25,8 @@ subscribe("chat", (event) => {
 });
 
 // OpenRouter (with usage accounting on) reports the real USD cost of each
-// response under providerMetadata.openrouter.usage.cost. Shared by the chat
-// agents (onboarding + SAM) that meter LLM spend against the credit pool.
+// response under providerMetadata.openrouter.usage.cost. Used by SAM to meter
+// LLM spend against the credit pool.
 const openRouterUsageSchema = z.object({
   openrouter: z.object({ usage: z.object({ cost: z.number() }) }),
 });
@@ -36,19 +36,18 @@ export function openRouterCostUsd(providerMetadata: unknown): number {
   return parsed.success ? parsed.data.openrouter.usage.cost : 0;
 }
 
-// A non-LLM assistant turn streamed back over the chat protocol. Used to surface
-// gates ("Subscribe to continue") without spending an LLM call — the client
-// renders it as a normal assistant message.
-export function staticAssistantResponse(text: string): Response {
-  const stream = createUIMessageStream({
-    execute: ({ writer }) => {
-      const id = crypto.randomUUID();
-      writer.write({ type: "text-start", id });
-      writer.write({ type: "text-delta", id, delta: text });
-      writer.write({ type: "text-end", id });
-    },
-  });
-  return createUIMessageStreamResponse({ stream });
+/**
+ * The cost hosted billing settles, so hosted fails closed when it is missing.
+ * Off hosted nothing is billed, and a self-host's own OPENROUTER_BASE_URL
+ * provider may report no cost at all.
+ */
+export async function requireOpenRouterCostUsd(
+  providerMetadata: unknown,
+): Promise<number> {
+  const parsed = openRouterUsageSchema.safeParse(providerMetadata);
+  if (parsed.success) return parsed.data.openrouter.usage.cost;
+  if (await isHostedServerAuthMode()) throw parsed.error;
+  return 0;
 }
 
 // The provider package re-exports only LanguageModelV3 itself, so the stream

@@ -1,8 +1,12 @@
+import { requireOrgPermission } from "@/server/auth/org-gate";
+import { completeOnboardingFromAgent } from "@/server/features/activation/mcpActivation";
 import { ProjectService } from "@/server/features/projects/services/ProjectService";
+import { AppError } from "@/server/lib/errors";
+import { isHostedServerAuthMode } from "@/server/lib/runtime-env";
 import { mcpResponse } from "@/server/mcp/formatters";
-import { type ToolContext } from "@/server/mcp/context";
+import { isHostedMcpClient, type ToolContext } from "@/server/mcp/context";
 import { optionalMetaOutputSchema } from "@/server/mcp/output-schemas";
-import { buildDashboardUrl } from "@/server/mcp/urls";
+import { buildConnectGscUrl, buildDashboardUrl } from "@/server/mcp/urls";
 import { languageCodeSchema, locationCodeSchema } from "@/server/mcp/schemas";
 import { createProjectSchema } from "@/types/schemas/projects";
 import { z } from "zod";
@@ -43,7 +47,7 @@ export const createProjectTool = {
     description:
       "Create a new project in the user's organization. Uses no credits — does not call DataForSEO. Provide a name, and optionally a domain and default market (locationCode/languageCode; a languageCode requires a locationCode). Returns the created {id, name, domain, locationCode, languageCode, url}; pass the returned `id` as `projectId` to other OpenSEO tools. Call list_projects first to avoid creating a duplicate.",
     inputSchema,
-    outputSchema: {
+    outputSchema: z.looseObject({
       project: z
         .object({
           id: z.string(),
@@ -55,7 +59,7 @@ export const createProjectTool = {
         })
         .passthrough(),
       ...optionalMetaOutputSchema,
-    },
+    }),
     annotations: {
       readOnlyHint: false,
       openWorldHint: false,
@@ -64,18 +68,46 @@ export const createProjectTool = {
   },
   handler: async (args: Args, context: ToolContext) => {
     const { baseUrl, ...auth } = context.auth;
+    // Same gate as the createProject server function — MCP and the dashboard
+    // must agree on who can create projects.
+    requireOrgPermission(auth, { project: ["create"] });
     // Reuse the app's create schema so the market pair rule (a languageCode
-    // requires a locationCode) is enforced identically to the dashboard, and
-    // the domain is normalized the same way.
-    const input = createProjectSchema.parse(args);
+    // requires a locationCode) and domain normalization match the dashboard.
+    // A rejection is bad caller input, not a fault: VALIDATION_ERROR keeps it
+    // out of error reporting while still naming the bad field.
+    const parsedInput = createProjectSchema.safeParse(args);
+    if (!parsedInput.success) {
+      throw new AppError(
+        "VALIDATION_ERROR",
+        z.prettifyError(parsedInput.error),
+      );
+    }
+    const input = parsedInput.data;
     const project = await ProjectService.createProject(
       auth.organizationId,
       input,
     );
-    return mcpResponse({
-      text: `Created project ${project.id}  ${project.name}${
+    // Hosted users only: self-host and SAM never run the onboarding wizard.
+    // Best-effort: the project already exists, and an error here would make
+    // the agent retry and create a duplicate.
+    if (isHostedMcpClient(auth)) {
+      await completeOnboardingFromAgent(auth, "agent_project");
+    }
+    const lines = [
+      `Created project ${project.id}  ${project.name}${
         project.domain ? ` (${project.domain})` : ""
       }  market:${project.locationCode}/${project.languageCode}`,
+    ];
+    // External agents on the hosted app only: SAM runs inside the app, and a
+    // self-host may have no Google client to connect with. An OAuth or API key
+    // client alone doesn't mean hosted, because password self-hosts have them.
+    if (isHostedMcpClient(auth) && (await isHostedServerAuthMode())) {
+      lines.push(
+        `Search Console isn't connected to this project yet. Offer the user this link to connect it, so you can use the site's real Google data: ${buildConnectGscUrl(baseUrl, project.id, Boolean(auth.guestClaimToken))}`,
+      );
+    }
+    return mcpResponse({
+      text: lines.join("\n"),
       meta: {
         url: buildDashboardUrl(baseUrl, `/p/${project.id}`),
       },

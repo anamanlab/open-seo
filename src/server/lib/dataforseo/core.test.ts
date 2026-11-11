@@ -1,37 +1,126 @@
+import { gzipSync } from "node:zlib";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/server/lib/runtime-env", () => ({
-  getRequiredEnvValue: vi.fn().mockResolvedValue("encoded-credentials"),
+  // AUTH_MODE unset: the deployment holds the DataForSEO key.
+  getOptionalEnvValue: vi.fn(async () => undefined),
+  getRequiredEnvValue: vi.fn(async () => "encoded-credentials"),
 }));
 
-import { onPageApi } from "@/server/lib/dataforseo/core";
+import { dataforseoPost } from "@/server/lib/dataforseo/core";
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("DataForSEO OnPage transport", () => {
-  it("reports HTTP 402 as a billing error", async () => {
+describe("DataForSEO transport", () => {
+  it("surfaces HTTP 402 as a provider billing restriction without retrying", async () => {
     const fetchMock = vi
-      .fn()
-      .mockResolvedValue(new Response("Payment required", { status: 402 }));
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        Response.json({ status_code: 40200 }, { status: 402 }),
+      );
     vi.stubGlobal("fetch", fetchMock);
-
-    await expect(onPageApi().lighthouseLiveJson([])).rejects.toMatchObject({
-      code: "DATAFORSEO_BILLING_ISSUE",
-    });
+    await expect(
+      dataforseoPost("/v3/backlinks/summary/live", []),
+    ).rejects.toMatchObject({ code: "DATAFORSEO_BILLING_ISSUE" });
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it("does not retry a Lighthouse HTTP 5xx response", async () => {
+  it("retries a transient 5xx on idempotent reads and returns the parsed envelope", async () => {
     const fetchMock = vi
-      .fn()
-      .mockResolvedValue(new Response("upstream failure", { status: 503 }));
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response("upstream failure", { status: 503 }))
+      .mockResolvedValueOnce(Response.json({ status_code: 20000, tasks: [] }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(onPageApi().lighthouseLiveJson([])).rejects.toMatchObject({
-      code: "UPSTREAM_UNAVAILABLE",
-    });
+    await expect(
+      dataforseoPost("/v3/backlinks/summary/live", []),
+    ).resolves.toEqual({ status_code: 20000, tasks: [] });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.dataforseo.com/v3/backlinks/summary/live");
+    expect(new Headers(init?.headers).get("Authorization")).toBe(
+      "Basic encoded-credentials",
+    );
+    expect(new Headers(init?.headers).get("Accept-Encoding")).toBe("gzip");
+  });
+
+  // The Docker edition's runtime hands the body over still gzipped because we
+  // set Accept-Encoding ourselves; parsing it raw failed every call.
+  it("inflates a body the runtime left gzipped", async () => {
+    const envelope = { status_code: 20000, tasks: [] };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(gzipSync(JSON.stringify(envelope)), {
+          headers: { "Content-Encoding": "gzip" },
+        }),
+      ),
+    );
+
+    await expect(
+      dataforseoPost("/v3/backlinks/summary/live", []),
+    ).resolves.toEqual(envelope);
+  });
+
+  // An unverified account answers with HTTP 403 (status_code 40104). Left as
+  // INTERNAL_ERROR it reached self-hosters as "an unexpected error occurred".
+  it("maps a 403 to DATAFORSEO_AUTH_FAILED", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        Response.json({ status_code: 40104 }, { status: 403 }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      dataforseoPost("/v3/backlinks/summary/live", []),
+    ).rejects.toMatchObject({ code: "DATAFORSEO_AUTH_FAILED" });
     expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  // The request-deadline abort arrives as a bare DOMException. Left unclassified
+  // it escapes as an anonymous INTERNAL_ERROR; retrying it would replay a call
+  // DataForSEO may already have billed. Both names are reachable: the shared
+  // budget aborts with TimeoutError, Lighthouse's own controller with AbortError.
+  it.each(["TimeoutError", "AbortError"])(
+    "maps a %s abort to UPSTREAM_UNAVAILABLE without retrying",
+    async (name) => {
+      const fetchMock = vi
+        .fn<typeof fetch>()
+        .mockRejectedValue(new DOMException("aborted", name));
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(
+        dataforseoPost("/v3/serp/google/organic/live/advanced", []),
+      ).rejects.toMatchObject({
+        code: "UPSTREAM_UNAVAILABLE",
+        name: "DataForSEOTimeoutError",
+      });
+      expect(fetchMock).toHaveBeenCalledOnce();
+    },
+  );
+
+  // Seen in production: headers arrive in time, then the deadline aborts
+  // while the body is still streaming in.
+  it("maps a timeout while reading the body to UPSTREAM_UNAVAILABLE", async () => {
+    const body = new ReadableStream({
+      start(controller) {
+        controller.error(new DOMException("aborted", "TimeoutError"));
+      },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockResolvedValue(new Response(body)),
+    );
+
+    await expect(
+      dataforseoPost("/v3/dataforseo_labs/google/ranked_keywords/live", []),
+    ).rejects.toMatchObject({
+      code: "UPSTREAM_UNAVAILABLE",
+      name: "DataForSEOTimeoutError",
+    });
   });
 });

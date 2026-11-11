@@ -23,22 +23,21 @@ interface CrawlWindowLimits {
 }
 
 export const CRAWL_WINDOW: CrawlWindowLimits = {
-  initial: 10,
-  min: 5,
-  max: 20,
+  initial: 2,
+  min: 1,
+  max: 2,
   budgetBytes: 8 * 1024 * 1024,
 };
 
 /**
  * Limits for a chunk whose earlier attempt died mid-crawl — in production
- * almost always exceededMemory on a heavy-page site. The retry is the
- * chunk's last attempt (retry limit 1), so it must not re-run the exact
- * memory profile that just killed the isolate.
+ * often exceededMemory on a heavy-page site, so a retry must not re-run the
+ * exact memory profile that just killed the isolate.
  */
 export const RETRY_CRAWL_WINDOW: CrawlWindowLimits = {
-  initial: 3,
-  min: 2,
-  max: 5,
+  initial: 1,
+  min: 1,
+  max: 1,
   budgetBytes: 4 * 1024 * 1024,
 };
 
@@ -75,6 +74,9 @@ export function adjustCrawlWindow(
   const troubled = recent.filter(
     (page) =>
       page.fetchClass !== "ok" ||
+      // A 429 the retries recovered from still says we are crawling faster
+      // than the site allows.
+      page.rateLimited ||
       (page.responseTimeMs ?? 0) >= SLOW_RESPONSE_MS,
   ).length;
   let next = windowSize;

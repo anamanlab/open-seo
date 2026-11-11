@@ -12,7 +12,7 @@ import { mapKeywordItem } from "@/server/features/domain/services/domainKeywordM
 import { getKeywordsPage } from "@/server/features/domain/services/domainKeywordsPage";
 import { getPagesPage } from "@/server/features/domain/services/domainPagesPage";
 
-// Lets a caller attribute spend to its own feature (e.g. onboarding). Applied
+// Lets a caller attribute spend to its own feature (e.g. the SAM agent). Applied
 // to the DataForSEO call, not the cache key, so cached results are shared
 // across callers.
 type MeteringOverrides = {
@@ -26,8 +26,6 @@ const domainOverviewResultSchema = z.object({
   domain: z.string(),
   organicTraffic: z.number().nullable(),
   organicKeywords: z.number().nullable(),
-  backlinks: z.number().nullable(),
-  referringDomains: z.number().nullable(),
   hasData: z.boolean(),
   fetchedAt: z.string(),
 });
@@ -98,8 +96,6 @@ async function getOverview(
     domain,
     organicTraffic,
     organicKeywords,
-    backlinks: null,
-    referringDomains: null,
     hasData: organicKeywords != null && organicKeywords > 0,
     fetchedAt: nowIso,
   };

@@ -1,3 +1,4 @@
+import { MetricsTable } from "@/client/components/MetricsTable";
 import { useMemo, type ReactNode } from "react";
 import { ShieldAlert } from "lucide-react";
 import {
@@ -5,17 +6,33 @@ import {
   exportPages,
   exportPerformance,
 } from "@/client/features/audit/results/export";
-import type { AuditResultsData } from "@/client/features/audit/results/types";
+import type {
+  AuditLighthouseRow,
+  AuditResultsData,
+} from "@/client/features/audit/results/types";
 import { isLighthouseFailure } from "@/client/features/audit/results/AuditResultsTableFilterLogic";
 import {
   IssuesView,
   resolveIssueSeverity,
 } from "@/client/features/audit/results/IssuesView";
 import { PagesTable } from "@/client/features/audit/results/PagesTable";
+import { ShopifyCrawlWarning } from "@/client/features/audit/results/ShopifyCrawlWarning";
+import { RenderingWarnings } from "@/client/features/audit/results/RenderingWarnings";
+import { PerformanceTable } from "@/client/features/audit/results/ResultsTables";
 import {
-  ExportDropdown,
-  PerformanceTable,
-} from "@/client/features/audit/results/ResultsTables";
+  BotProtectionAdvice,
+  SCORE_TEXT_CLASS,
+  scoreTone,
+  SeverityBadge,
+} from "@/client/features/audit/shared";
+import { ExportMenu } from "@/client/components/ExportMenu";
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@/client/components/ui/alert";
+import { DataTableTabs } from "@/client/components/table/DataTableToolbar";
+import { TabsTrigger } from "@/client/components/ui/tabs";
 
 type ResultsTab = "issues" | "pages" | "performance";
 
@@ -24,142 +41,153 @@ export function ResultsView({
   data,
   onTabChange,
   tab,
+  siteBlocked,
 }: {
   projectId: string;
   data: AuditResultsData;
   tab: string;
   onTabChange: (tab: ResultsTab) => void;
+  /** The page already says bot protection blocked the whole site. */
+  siteBlocked: boolean;
 }) {
-  const { audit, pages, lighthouse, issues } = data;
+  const { audit, lighthouse, issueGroups } = data;
+  const auditRef = { projectId, auditId: audit.id };
+  const crawlStopped = issueGroups.some(
+    (group) => group.issueType === "crawl-rate-limited",
+  );
   const hasPerformanceTab = lighthouse.length > 0;
   const activeTab =
     tab === "performance" && !hasPerformanceTab ? "issues" : tab;
-  const stats = useResultStats(pages, lighthouse);
-  const blockedCount = useMemo(
-    () => pages.filter((page) => page.fetchClass === "blocked").length,
-    [pages],
+  const lighthouseSummary = useLighthouseSummary(lighthouse);
+  const blockedCount = data.fetchClassCounts.blocked;
+  const rateLimitedCount = data.fetchClassCounts.rate_limited;
+
+  // Shopify stores get their own notice instead of the generic advice.
+  const shopifyLimited =
+    audit.config.sitePlatform === "shopify" &&
+    (blockedCount > 0 || rateLimitedCount > 0 || crawlStopped);
+
+  const tabs = (
+    <ResultsHeader
+      issueCount={data.issueCount}
+      pageCount={data.pageCount}
+      lighthouseCount={lighthouse.length}
+      hasPerformanceTab={hasPerformanceTab}
+      activeTab={activeTab}
+      onTabChange={onTabChange}
+      onExport={(format) => {
+        if (activeTab === "performance") {
+          exportPerformance(lighthouse, format);
+          return;
+        }
+        if (activeTab === "issues") {
+          exportIssues(auditRef, format);
+          return;
+        }
+        exportPages(auditRef, format);
+      }}
+    />
   );
 
   return (
     <>
-      {blockedCount > 0 && (
-        <div className="flex items-start gap-3 rounded-lg border border-warning/30 bg-warning/5 px-4 py-3 text-sm">
-          <ShieldAlert className="mt-0.5 size-4 shrink-0 text-warning" />
-          <p>
-            <span className="font-medium">
-              We were blocked on {blockedCount}{" "}
-              {blockedCount === 1 ? "page" : "pages"}.
-            </span>{" "}
-            <span className="text-base-content/70">
-              The site's bot protection challenged our crawler, so those pages
-              couldn't be audited. We don't have a workaround for this yet.
-              Desktop crawlers run from your own machine and usually get past
-              it: try{" "}
-              <a
-                className="link link-primary"
-                href="https://github.com/PhialsBasement/LibreCrawl"
-                target="_blank"
-                rel="noreferrer"
-              >
-                LibreCrawl
-              </a>{" "}
-              (free, open source) or{" "}
-              <a
-                className="link link-primary"
-                href="https://www.screamingfrog.co.uk/seo-spider/"
-                target="_blank"
-                rel="noreferrer"
-              >
-                Screaming Frog
-              </a>{" "}
-              (free up to 500 URLs).
-            </span>
-          </p>
-        </div>
+      {shopifyLimited && (
+        <ShopifyCrawlWarning
+          projectId={projectId}
+          audit={audit}
+          throttled={rateLimitedCount > 0 || crawlStopped}
+        />
       )}
+
+      {!shopifyLimited && !siteBlocked && blockedCount > 0 && (
+        <Alert variant="warning">
+          <ShieldAlert />
+          <AlertTitle>
+            Bot protection blocked our crawler on {blockedCount}{" "}
+            {blockedCount === 1 ? "page" : "pages"}.
+          </AlertTitle>
+          <AlertDescription>
+            <BotProtectionAdvice
+              projectId={projectId}
+              rendered={audit.config.renderJavaScript === true}
+            />
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {!shopifyLimited && (rateLimitedCount > 0 || crawlStopped) && (
+        <Alert variant="warning">
+          <ShieldAlert />
+          <AlertTitle>
+            {crawlStopped
+              ? "The crawl stopped early because of the site’s rate limit."
+              : `The site rate limited us on ${rateLimitedCount} ${rateLimitedCount === 1 ? "page" : "pages"}.`}
+          </AlertTitle>
+          <AlertDescription>
+            {crawlStopped
+              ? "The site kept refusing pages, so some URLs were left unvisited. This report is incomplete. "
+              : "Pages that returned 429 Too Many Requests could not be audited. "}
+            Re-run the audit after the rate limit resets, or ask the site owner
+            to allow the{" "}
+            <a
+              className="underline underline-offset-4"
+              href="https://openseo.so/docs/crawler"
+              target="_blank"
+              rel="noreferrer"
+            >
+              OpenSEO-Audit crawler
+            </a>
+            .
+          </AlertDescription>
+        </Alert>
+      )}
+
+      <RenderingWarnings data={data} />
 
       <StatsStrip
         pagesCrawled={audit.pagesCrawled}
-        issues={issues}
+        issueCount={data.issueCount}
+        issueGroups={issueGroups}
         totalLighthouse={lighthouse.length}
-        averageResponseMs={stats.averageResponseMs}
-        lighthouseSummary={stats.lighthouseSummary}
+        averageResponseMs={data.averageResponseMs}
+        lighthouseSummary={lighthouseSummary}
       />
 
-      <div className="card bg-base-100 border border-base-300">
-        <div className="card-body gap-3">
-          <ResultsHeader
-            issueCount={issues.length}
-            pageCount={pages.length}
-            lighthouseCount={lighthouse.length}
-            hasPerformanceTab={hasPerformanceTab}
-            activeTab={activeTab}
-            onTabChange={onTabChange}
-            onExport={(format) => {
-              if (activeTab === "performance") {
-                exportPerformance(lighthouse, pages, format);
-                return;
-              }
-              if (activeTab === "issues") {
-                exportIssues(issues, format);
-                return;
-              }
-              exportPages(pages, format);
-            }}
-          />
-
-          {activeTab === "issues" && <IssuesView issues={issues} />}
-          {activeTab === "pages" && (
-            <PagesTable
-              pages={pages}
-              startUrl={audit.startUrl}
-              issues={issues}
-            />
-          )}
-          {activeTab === "performance" && lighthouse.length > 0 && (
-            <PerformanceTable
-              auditId={audit.id}
-              projectId={projectId}
-              lighthouse={lighthouse}
-              pages={pages}
-            />
-          )}
-        </div>
-      </div>
+      {activeTab === "issues" && (
+        <IssuesView auditRef={auditRef} issueGroups={issueGroups} tabs={tabs} />
+      )}
+      {activeTab === "pages" && (
+        <PagesTable
+          auditRef={auditRef}
+          canonicalHost={data.canonicalHost}
+          totalCount={data.pageCount}
+          tabs={tabs}
+        />
+      )}
+      {activeTab === "performance" && (
+        <PerformanceTable
+          auditId={audit.id}
+          projectId={projectId}
+          lighthouse={lighthouse}
+          tabs={tabs}
+        />
+      )}
     </>
   );
 }
 
-function useResultStats(
-  pages: AuditResultsData["pages"],
-  lighthouse: AuditResultsData["lighthouse"],
-) {
-  const averageResponseMs = useMemo(() => {
-    if (pages.length === 0) return 0;
-    const total = pages.reduce(
-      (sum: number, page: AuditResultsData["pages"][number]) =>
-        sum + (page.responseTimeMs ?? 0),
-      0,
-    );
-    return Math.round(total / pages.length);
-  }, [pages]);
-
-  const lighthouseSummary = useMemo(() => {
-    const failed = lighthouse.filter(
-      (row: AuditResultsData["lighthouse"][number]) => isLighthouseFailure(row),
-    ).length;
-    const successful = lighthouse.filter(
-      (row: AuditResultsData["lighthouse"][number]) =>
-        !isLighthouseFailure(row),
-    );
+function useLighthouseSummary(lighthouse: AuditLighthouseRow[]) {
+  return useMemo(() => {
+    const failed = lighthouse.filter((row) => isLighthouseFailure(row)).length;
+    const successful = lighthouse.filter((row) => !isLighthouseFailure(row));
     const averageScore = (
       key: "performanceScore" | "seoScore" | "accessibilityScore",
     ) => {
       const values = successful
-        .map((row: AuditResultsData["lighthouse"][number]) => row[key])
-        .filter((value: number | null): value is number => value != null);
+        .map((row) => row[key])
+        .filter((value): value is number => value != null);
       if (values.length === 0) return null;
-      const total = values.reduce((sum: number, value) => sum + value, 0);
+      const total = values.reduce((sum, value) => sum + value, 0);
       return Math.round(total / values.length);
     };
 
@@ -170,8 +198,6 @@ function useResultStats(
       avgAccessibility: averageScore("accessibilityScore"),
     };
   }, [lighthouse]);
-
-  return { averageResponseMs, lighthouseSummary };
 }
 
 function ResultsHeader({
@@ -205,28 +231,22 @@ function ResultsHeader({
   ];
 
   return (
-    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-      <div role="tablist" className="tabs tabs-border w-fit">
-        {tabs.map(({ label, tab }) => {
-          const isActive = activeTab === tab;
-
-          return (
-            <button
-              key={tab}
-              type="button"
-              role="tab"
-              aria-selected={isActive}
-              className={`tab ${isActive ? "tab-active" : ""}`}
-              onClick={() => onTabChange(tab)}
-            >
-              {label}
-            </button>
-          );
-        })}
-      </div>
-
-      <ExportDropdown onExport={onExport} />
-    </div>
+    <DataTableTabs
+      value={activeTab}
+      onValueChange={(value) => {
+        const next = tabs.find((item) => item.tab === value);
+        if (next) onTabChange(next.tab);
+      }}
+      actions={
+        <ExportMenu actions={["sheets", "csv", "json"]} onExport={onExport} />
+      }
+    >
+      {tabs.map(({ label, tab }) => (
+        <TabsTrigger key={tab} value={tab}>
+          {label}
+        </TabsTrigger>
+      ))}
+    </DataTableTabs>
   );
 }
 
@@ -239,13 +259,15 @@ interface StatItem {
 
 function StatsStrip({
   pagesCrawled,
-  issues,
+  issueCount,
+  issueGroups,
   totalLighthouse,
   averageResponseMs,
   lighthouseSummary,
 }: {
   pagesCrawled: number;
-  issues: AuditResultsData["issues"];
+  issueCount: number;
+  issueGroups: AuditResultsData["issueGroups"];
   totalLighthouse: number;
   averageResponseMs: number;
   lighthouseSummary: {
@@ -257,37 +279,47 @@ function StatsStrip({
 }) {
   const severityCounts = useMemo(() => {
     const counts = { critical: 0, warning: 0, info: 0 };
-    for (const issue of issues) {
-      counts[resolveIssueSeverity(issue)] += 1;
+    for (const group of issueGroups) {
+      counts[resolveIssueSeverity(group)] += group.count;
     }
     return counts;
-  }, [issues]);
+  }, [issueGroups]);
 
   const items: StatItem[] = [
     { label: "Pages crawled", value: String(pagesCrawled) },
     {
       label: "Issues found",
-      value: String(issues.length),
-      valueClass: issues.length === 0 ? "text-success" : "",
-      sub: issues.length > 0 && (
-        <span className="flex items-center gap-2.5">
-          <SeverityCount count={severityCounts.critical} dotClass="bg-error" />
-          <SeverityCount count={severityCounts.warning} dotClass="bg-warning" />
-          <SeverityCount
-            count={severityCounts.info}
-            dotClass="bg-base-content/30"
-          />
+      value: String(issueCount),
+      valueClass: issueCount === 0 ? "text-success" : "",
+      sub: issueCount > 0 && (
+        <span className="flex flex-wrap items-center gap-1">
+          {(["critical", "warning", "info"] as const).map((severity) =>
+            severityCounts[severity] > 0 ? (
+              <SeverityBadge
+                key={severity}
+                severity={severity}
+                title={severity}
+              >
+                {severity === "critical"
+                  ? "Critical"
+                  : severity === "warning"
+                    ? "Warning"
+                    : "Info"}{" "}
+                {severityCounts[severity]}
+              </SeverityBadge>
+            ) : null,
+          )}
         </span>
       ),
     },
-    { label: "Avg response", value: `${averageResponseMs}ms` },
+    { label: "Average response time", value: `${averageResponseMs}ms` },
   ];
 
   if (totalLighthouse > 0) {
     items.push(
       { label: "Lighthouse tests", value: String(totalLighthouse) },
       {
-        label: "Avg Lighthouse perf",
+        label: "Lighthouse performance",
         value:
           lighthouseSummary.avgPerformance == null
             ? "-"
@@ -295,7 +327,7 @@ function StatsStrip({
         valueClass: scoreClass(lighthouseSummary.avgPerformance),
       },
       {
-        label: "Avg Lighthouse SEO",
+        label: "Lighthouse SEO",
         value:
           lighthouseSummary.avgSeo == null
             ? "-"
@@ -303,7 +335,7 @@ function StatsStrip({
         valueClass: scoreClass(lighthouseSummary.avgSeo),
       },
       {
-        label: "Avg Lighthouse a11y",
+        label: "Lighthouse accessibility",
         value:
           lighthouseSummary.avgAccessibility == null
             ? "-"
@@ -314,58 +346,29 @@ function StatsStrip({
         label: "Lighthouse failures",
         value: String(lighthouseSummary.failed),
         valueClass:
-          lighthouseSummary.failed > 0 ? "text-error" : "text-success",
+          lighthouseSummary.failed > 0 ? "text-destructive" : "text-success",
       },
     );
   }
 
-  const columnsClass =
-    items.length === 3
-      ? "grid-cols-1 sm:grid-cols-3"
-      : "grid-cols-2 md:grid-cols-4";
-
   return (
-    <div
-      className={`grid ${columnsClass} gap-px rounded-lg border border-base-300 bg-base-300/70 overflow-hidden`}
-    >
-      {items.map((item) => (
-        <div key={item.label} className="bg-base-100 px-4 py-3">
-          <p className="text-[11px] uppercase tracking-wider text-base-content/50">
-            {item.label}
-          </p>
-          <p
-            className={`text-xl font-semibold mt-0.5 tabular-nums ${item.valueClass ?? ""}`}
-          >
-            {item.value}
-          </p>
-          {item.sub && (
-            <div className="text-xs text-base-content/60 mt-1">{item.sub}</div>
-          )}
-        </div>
-      ))}
+    <div className="w-full max-w-xl rounded-lg border border-border bg-card p-3">
+      <MetricsTable
+        rows={items.map((item) => ({
+          label: (
+            <div className="flex flex-wrap items-center gap-2">
+              {item.label}
+              {item.sub || null}
+            </div>
+          ),
+          value: <span className={item.valueClass}>{item.value}</span>,
+        }))}
+      />
     </div>
   );
 }
 
-function SeverityCount({
-  count,
-  dotClass,
-}: {
-  count: number;
-  dotClass: string;
-}) {
-  if (count === 0) return null;
-  return (
-    <span className="flex items-center gap-1 tabular-nums">
-      <span className={`size-1.5 rounded-full ${dotClass}`} />
-      {count}
-    </span>
-  );
-}
-
 function scoreClass(score: number | null) {
-  if (score == null) return "";
-  if (score >= 90) return "text-success";
-  if (score >= 50) return "text-warning";
-  return "text-error";
+  const tone = scoreTone(score);
+  return tone ? SCORE_TEXT_CLASS[tone] : "";
 }
